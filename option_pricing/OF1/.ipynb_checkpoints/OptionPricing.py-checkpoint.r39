@@ -1,0 +1,100 @@
+# -*- coding:utf-8 -*-
+import datetime
+import numpy as np
+import scipy.stats as sps
+
+__label__='OF1.Model.Info.1'
+class OptionPricing():
+    def __init__(self):
+        pass
+    def BSPricing(self,s,k,r,t,sigma,cp_sign,g,dividends='continuous'):
+        # Black-Scholes Option Pricing Model
+        # this is for European Options
+        #------------------------------------
+        #s:Underlying Assets Price
+        #k:Strike Price
+        #r:risk free interest rate
+        #T:avaiable time
+        #sigma:square root of annual variance
+        #cp: call or put
+        #g: dividend yield
+        # dividends:continuous
+        #-----------------------------
+        #总结如下：
+        #1、不派发股利欧式看涨期权 BS可使用
+        #2、不派发股利欧式看跌期权 BS可使用
+        #3、不派发股利美式看涨期权 BS可使用:不派发股利的美式看涨期权不会提前行权，性质上与欧式期权一致，
+        #4、不派发股利美式看跌期权 BS可使用:不派发股利的美式看跌期权不会提前行权，性质上与欧式期权一致，
+        #5、派发股利欧式看涨期权   BS可使用
+        #6、派发股利欧式看跌期权   BS可使用
+        #7、派发股利美式看涨期权   BS不可使用
+        #8、派发股利美式看跌期权   BS不可使用
+
+        if dividends !='continuous':
+            d=g
+            s=s-d*np.exp(-r*t)
+            g=0
+            #s= S − Dte − rT。
+        else:
+            pass
+        d1=(np.log(s/k)+((r-g)+0.5*(sigma)**2)*(t))/(sigma*np.sqrt(t))
+        d2=d1-sigma*np.sqrt(t)
+        optionfee=cp_sign*s*np.exp(-g*t)*sps.norm.cdf(cp_sign*d1)-cp_sign*k*np.exp(-r * t)* sps.norm.cdf(cp_sign * d2)
+        return optionfee
+    def MCPricing(self,s,k,r,t,sigma,cp_sign,g,dividends='continuous', iteration=1000000):
+        # Monte Carlo Pricing Model
+        #----------------------------------
+        #s:Underlying Assets Price
+        #k:Strike Price
+        #r:risk free interest rate
+        #T:avaiable time
+        #sigma:square root of annual variance
+        #cp: call or put
+        #g: dividend yield
+        # dividends:continuous
+        if dividends !='continuous':
+            d=g
+            s=s-d*np.exp(-r*t)
+            g=0
+            #s= S − Dte − rT。
+        else:
+            pass
+        zt = np.random.normal(0, 1, iteration)
+        st = s * np.exp((r - g- .5 * sigma ** 2) * t + sigma * t ** .5 * zt)
+        p = []
+        for St in st:
+            p.append(max(cp_sign * (St - k), 0))
+        return np.average(p) * np.exp(-r * t)
+
+def CalImpliedVolatility(s,k,r,t,cp,cp_sign,g,zero=1e-10,func=OptionPricing().BSPricing):
+    # this functino is calucate the implied volatility of one optionself.
+    # ---------------------------------
+    #s:Underlying Assets Price
+    #k:Strike Price
+    #r:risk free interest rate
+    #T:avaiable time
+    #sigma:square root of annual variance
+    #cp: call or put
+    #g: dividend yield
+    # dividends:continuous
+
+    #func=BSPricing
+    sigma=0.3 # initial volatility
+    mktprice=cp
+    C=func(s,k,r,t,sigma,cp_sign,g)
+    lower=0
+    upper=1
+    while abs(C-mktprice)>zero:
+        C=func(s,k,r,t,sigma,cp_sign,g)
+        if C-mktprice>0:
+            upper=sigma
+            sigma=(sigma+lower)/2
+        else:
+            lower=sigma
+            sigma=(sigma+upper)/2
+    return sigma # implied volatility
+if __name__ == '__main__':
+    op=OptionPricing()
+    s,x,r,t,sigma,cp_sign,g=50,50,0.02,1,.05,1,0
+    cp= op.BSPricing(s,x,r,t,sigma,cp_sign,g)
+    print cp,sigma,CalImpliedVolatility(s,x,r,t,cp,cp_sign,g)
