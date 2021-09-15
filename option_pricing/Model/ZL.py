@@ -3,7 +3,20 @@ import numpy as np
 import pandas as pd
 import scipy.stats as sps
 from scipy.optimize import brentq, fmin, minimize
+from scipy.optimize import brentq
 
+
+"""
+ZL 模型思想
+推论1：中国可转债发行公司的最优决策是尽可能早地、以尽可能高的转股价格促使投资者将可转债转成公司股票
+推论2：在中国特殊的制度背景下，可转债中股性占了绝大部分，而且中国的信用风险溢酬不高，因此将可转债的股性和债性统一起来，全部使用无风险利率进行贴现，
+并不会对可转债的价值造成很大的影响。
+推论3：因为中国可转债发行条款均规定转股价将根据公司股票的股利政策进行相应的调整，可转债中的转股权不会被提前执行，他实际上是一个欧式看涨期权。
+推论4：公司会选择尽可能短的赎回期
+推论5：可转债发现公司只有在面临回售压力时才会调低转股价，调低幅度也仅以使得可转债价格稍微超过回售价格为限。
+
+
+"""
 
 """
 实现步骤：
@@ -219,7 +232,7 @@ class MockStrikePrice(object):
         return P
 
     @classmethod
-    def cal_d_xt(cls, P, st, old_kt, r, sigma, T, I):
+    def cal_d_xt(cls, P, st, old_kt, r, sigma, T, I, IV_LOWER_BOUND=1e-8):
         """
         计算下修后的转股价格（d_xt）
         :param P: 条件回售价格
@@ -234,11 +247,9 @@ class MockStrikePrice(object):
         """
         func = lambda d_xt: P - cls.formula_d_xt_P(st, d_xt, r, sigma, T, I)
 
-        d_xt_solved_result = minimize(func, old_kt * 0.8)
-        if d_xt_solved_result.success:
-            return d_xt_solved_result.x
-        else:
-            raise ValueError(f'{d_xt_solved_result}')
+        d_xt_solved_result = brentq(func, 1e-8, old_kt * 1)
+
+        return d_xt_solved_result if d_xt_solved_result > IV_LOWER_BOUND else IV_LOWER_BOUND
 
     @classmethod
     def cal_value(cls, st, xt, r, sigma, T, I):
@@ -256,9 +267,22 @@ class MockStrikePrice(object):
         return V
 
     @classmethod
-    def check_wthr_dwnwrd_adj(cls, st, xt, r, sigma, T, I, P):
+    def _cal_dwnwrd_adj(cls, st, xt, r, sigma, T, I, P):
+        v = cls.cal_value(st, xt, r, sigma, T, I)
+        # 当持有可转债价值(V) 小于回售价值（P）的时候，投资者可能选择回售，企业会面临回售压力,从而选择调低转股价格（下修）
+        if v < P:
+            print('will downward adjustment strike price')
+            return cls.cal_d_xt(P, st, xt, r, sigma, T, I)
+        else:
+            print('will not downward adjustment strike price')
+            return xt
+
+    @classmethod
+    def check_wthr_dwnwrd_adj(cls, st, xt, r, sigma, T, I, P, buyback_cond: float, force=False):
         """
         st < 0.7xt
+        :param force:
+        :param buyback_cond:  回售触发条件
         :param st:
         :param xt:
         :param r:
@@ -268,26 +292,39 @@ class MockStrikePrice(object):
         :param P:
         :return:
         """
-        v = cls.cal_value(st, xt, r, sigma, T, I)
-        if v < P:
-            print('will downward adjustment strike price')
-            return cls.cal_d_xt(P, st, xt, r, sigma, T, I)
+        if force:
+            print('force cal downward-adjusted strike price')
+            return cls._cal_dwnwrd_adj(st, xt, r, sigma, T, I, P), 'force'
+        # check whether active buyback situation
+        if st < buyback_cond * xt:
+            print(' active buyback condition!')
+            print(st, buyback_cond * xt, st < buyback_cond * xt)
+            return cls._cal_dwnwrd_adj(st, xt, r, sigma, T, I, P), 'active'
+
         else:
-            print('will not downward adjustment strike price')
-            return xt
+            print('not active buyback condition!')
+            return xt, 'non-active'
 
 
+# 需要考虑的
+# 1. 回售期
+# 2. 回售触发条件
+# 3. 转股期
+# 4. 赎回触发条件
+# 5. 下修条件
 if __name__ == '__main__':
-    # 济州转债
-    r, sigma, T = 0.015, 0.228166, 1.1808
-    st = 17.19
-    xt = 23.4
+    # 九州转债
+    r, sigma, T = 0.015, 0.222777, 0.3342
+    st = 16.
+    xt = 17.8300
     n = (100000, 200)
     I = 0.015 * 100
-    P = 11.7  # 回售触发价
-    print(st < xt*0.8)
+    P = 103.0  # 回售触发价
+    buyback_cond = 0.7
+    print(st < xt * buyback_cond)
     ## 触发修正价 18.72 = 23.4 * 0.8
     # sn = MockStockPath.create_sn(s, r, sigma, T, n=n)
     # kn = MockStrikePrice.init_strike_price(k, n)
-    d_kt = MockStrikePrice.check_wthr_dwnwrd_adj(st, xt, r, sigma, T, I, P)
+    d_kt = MockStrikePrice.check_wthr_dwnwrd_adj(st, xt, r, sigma, T, I, P, buyback_cond)
+    print(xt, d_kt)
     pass
