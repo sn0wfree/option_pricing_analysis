@@ -1,62 +1,14 @@
 # coding=utf-8
+import warnings
+from functools import partial
+
 import numpy as np
 import pandas as pd
 import scipy.stats as sps
-from scipy.optimize import brentq, fmin, minimize
 from scipy.optimize import brentq
-from functools import partial
+from statsmodels.api import OLS
+
 from option_pricing.utils.file_cache import file_cache
-import warnings
-
-# TODO 债券利息还没处理好
-# TODO 条款信息还没有处理好
-"""
-ZL 模型思想
-推论1：中国可转债发行公司的最优决策是尽可能早地、以尽可能高的转股价格促使投资者将可转债转成公司股票
-推论2：在中国特殊的制度背景下，可转债中股性占了绝大部分，而且中国的信用风险溢酬不高，因此将可转债的股性和债性统一起来，全部使用无风险利率进行贴现，
-并不会对可转债的价值造成很大的影响。
-推论3：因为中国可转债发行条款均规定转股价将根据公司股票的股利政策进行相应的调整，可转债中的转股权不会被提前执行，他实际上是一个欧式看涨期权。
-推论4：公司会选择尽可能短的赎回期
-推论5：可转债发现公司只有在面临回售压力时才会调低转股价，调低幅度也仅以使得可转债价格稍微超过回售价格为限。
-
-
-"""
-
-"""
-实现步骤：
-（1） 使用正股复权后价格计算股价年波动率，数据长度为计算日前 1 年；
-（2） Monte Carlo 模拟生成 n 条股价路径，对未来正股价格进行预测；
-（3） 每一计息年度，对 n 条路径进行跟踪，一旦股价满足回售条款，则调整转股价，
-使得可转债价值大于回售价格；
-（4） 在触发回售条款的路径中，统计触发回售之后又触发赎回条款的路径，计算触
-发日转股价值，并贴现至计算日，加上存续期截止至转股时的利息贴现，记为
-CBVi；
-（5） 在未触发回售条款的路径中，统计触发赎回条款的路径，计算触发日转股价值，
-并贴现至计算日，加上存续期截止至转股时的利息贴现，记为 CBVi；
-（6） 对于未触发赎回条款的其余路径，不受任何可转债条款影响，是否转股只与转
-股价值有关，用 LSM 方法对该美式期权进行定价；
-到期日可转债价格为
-CB S T X coupon end = + max( ( )*100 / ,100 ( ))；
-（coupon end ( ) 为最后一期票息）；找出 T-1 时刻转股价值大于持有价值的路
-径，将股价记为 Z；将路径对应的 CB(T)贴现到 T-1 时刻，记为 Y，利用最小
-二乘法，得到回归方程：
-2 Y a bZ cZ =+ + * *
-代入 Z，得到期望值，与 T-1 时刻的转股价值比较，决定继续持有还是转股；
-如转股，则将现金流设置为转股价值；依次循环，得到 T-2、…、1 时刻的转债
-价格，最后均贴现至计算日；
-（7） 取各路径转债价值的平均值，即得可转债价值；
-"""
-"""
-T: 可转债剩余到期时间
-Bc： 到期赎回价（不包含最后一期利息）
-dt： dt = T/200, 表示单位时间间隔
-r： 无风险利率
-sigma： 股票年化波动率
-C： 条件赎回价格
-X： 可转债执行价格
-P: 条件回售价格
-n： n = 100/x, 表示可转债转换比例
-"""
 
 
 class MockStockPath(object):
@@ -97,73 +49,6 @@ class MockStockPath(object):
         return route * sn
 
 
-#
-# class Provision(object):
-#     @staticmethod
-#     def provised_strike_price(self):
-#         pass
-#
-#     @staticmethod
-#     def formula(st, nd1, provised_k, nd2, r, T, i):
-#         """
-#
-#         :param st:
-#         :param nd1:
-#         :param provised_k:
-#         :param nd2:
-#         :param r:
-#         :param T: 可转债剩余到期时间
-#         :param i:
-#         :return:
-#         """
-#         p1 = st * nd1 - provised_k * np.exp(-r * (T) * nd2)
-#         P = p1 * (100 / provised_k) + (100 + i) * np.exp(-r * (T))
-#         return P
-#
-#     @staticmethod
-#     def d1(st, provised_k, r, sigma, T):
-#         """
-#
-#         :param st:
-#         :param provised_k:
-#         :param r:
-#         :param sigma:
-#         :param T:  可转债剩余到期时间
-#         :return:
-#         """
-#         return (np.log(st / provised_k) + (r + (sigma ** 2) / 2) * (T)) / (sigma * np.sqrt(T))
-#
-#     @staticmethod
-#     def d2(d1, sigma, T):
-#         """
-#
-#         :param d1:
-#         :param sigma:
-#         :param T: 可转债剩余到期时间
-#         :return:
-#         """
-#         return d1 - sigma * (np.sqrt(T))
-#
-#     @classmethod
-#     def get_d1_d2(cls, st, provised_k, r, sigma, T):
-#         """
-#
-#         :param st:
-#         :param provised_k:
-#         :param r:
-#         :param sigma:
-#         :param T: 可转债剩余到期时间
-#         :return:
-#         """
-#         d1 = cls.d1(st, provised_k, r, sigma, T)
-#         d2 = cls.d2(d1, sigma, T)
-#         return d1, d2
-#
-#     @staticmethod
-#     def get_nd1_nd2(d1, d2):
-#         return sps.norm.cdf(d1), sps.norm.cdf(d2)
-
-
 class MockStrikePrice(object):
 
     @staticmethod
@@ -201,7 +86,6 @@ class MockStrikePrice(object):
         return d1 - sigma * (T)
 
     @classmethod
-    @file_cache()
     def Nd(cls, st, d_xt, r, sigma, T, ):
         """
 
@@ -311,6 +195,115 @@ class MockStrikePrice(object):
             return xt, 'non-active'
 
 
+class LSM(object):
+    @classmethod
+    def method(cls, cS, cK, r, Bc, interest_func, **kwargs):
+        days = cS.columns
+        tm = int(days[-1].strip('day_'))
+        CashFlow, time = cls.step1(Bc, cS, cK, tm)  # init
+        CashFlow = CashFlow[f'day_{time}']
+        Time = pd.Series([time] * len(days), index=days)  # init
+        Z = (100 / cK) * cS
+        sorted_days = sorted(days, reverse=1, key=lambda x: int(x.strip('day_')))
+        front = sorted_days[1:]
+        end = sorted_days[:-1]
+        dt = 1 / 250
+        for dayN1, dayN in zip(front, end):
+            cfn = CashFlow[dayN]  # skip N=200
+            day_S = cS[dayN1]
+            day_K = cK[dayN1]
+            mask = day_S > day_K
+            true_day_S = day_S[mask]
+            if true_day_S.empty:
+                pass
+            else:
+                y = np.exp(-r * dt) * (cfn + interest_func(dt))
+                tg_y = y[mask]
+                tg_z = Z[mask][dayN1]
+                tg_z2 = np.square(tg_z)
+                yz = pd.concat([tg_y, tg_z, tg_z2], axis=1)
+                yz.columns = ['y', 'z', 'z2']
+
+                model = OLS.from_formula('y ~ 1 + z + z2', data=yz).fit()
+                EYZ = model.fittedvalues
+
+                ez_mask = tg_z > EYZ
+                path_idx = ez_mask[ez_mask].index
+                if path_idx.empty:
+                    print('not update cashflow and time!')
+                else:
+                    for path in path_idx:
+                        update = tg_z[path]
+                        cfn[path] = update
+                    print(1)
+
+                print(1)
+                pass
+
+        print(1)
+        pass
+
+    @staticmethod
+    def step1(Bc, sn, xn, tm):
+        """
+
+        :param Bc:
+        :param sn:
+        :param xn:
+        :param tm: period
+        :return:
+        """
+
+        n = 100 / xn
+
+        cash_flow = np.maximum(Bc, n * sn)
+        return cash_flow, tm
+
+    @classmethod
+    def step2_1(cls, sn1, xn1, Bc, dt, r, interest, tm):
+        """
+
+        :param tm:  period
+        :param Bc: 到期赎回价
+        :param sn1:  stock at n-1 period
+        :param xn1:  strike at n-1 period
+        :param dt:  duration between n and n-1 period
+        :param r: risk free
+        :param interest:  interest
+        :return:
+        """
+
+        z = (100 / xn1) * sn1  # 行权路径
+        cashflow = cls.step1(Bc, sn1, xn1, tm)
+        y = np.exp(-r * dt)(cashflow + interest)
+        return y, z
+
+    @classmethod
+    def step2_2(cls, sn1_array, xn1_array, Bc, dt, r, interest, tm):
+        """
+
+        :param sn1_array: array of stock at n-1 period
+        :param xn1_array: array of strike at n-1 period
+        :param tm:  period
+        :param Bc: 到期赎回价
+        :param dt:  duration between n and n-1 period
+        :param r: risk free
+        :param interest:  interest
+        :return:
+        """
+        mask = sn1_array > xn1_array
+        sn1_array_filter = sn1_array[mask]
+        xn1_array_filter = xn1_array[mask]
+        func = partial(cls.step2_1, Bc=Bc, dt=dt, r=r, interest=interest, tm=tm)
+        yz = pd.DataFrame([func(sn1, xn1) for sn1, xn1 in zip(sn1_array_filter, xn1_array_filter)], columns=['y', 'z'])
+        yz['z2'] = np.square(yz['z'])
+
+        from statsmodels.api import OLS
+        model = OLS.from_formula('y ~ 1 + z + z2', data=yz).fit()
+
+        pass
+
+
 class Mock(object):
     @staticmethod
     def init_strike_price(k: float, n: int = (100000, 200)):
@@ -328,23 +321,10 @@ class Mock(object):
 
     @classmethod
     @file_cache()
-    def check_dwnwrd(cls, S, K, V, r=0.015, sigma=0.222777, T=0.3342,
+    def check_dwnwrd(cls, S: pd.DataFrame, K: pd.DataFrame, V: pd.DataFrame, r=0.015, sigma=0.222777, T=0.3342,
                      I=0.015 * 100,
                      P=103.0,  # 回售触发价
                      buyback_cond=0.7):
-        """
-
-        :param S:
-        :param K:
-        :param V:
-        :param r:
-        :param sigma:
-        :param T:
-        :param I:
-        :param P:
-        :param buyback_cond:
-        :return:
-        """
         downward_adj_func = partial(MockStrikePrice.check_wthr_dwnwrd_adj, r=r, sigma=sigma, I=I, P=P,
                                     buyback_cond=buyback_cond)
         for idx in S.index:
@@ -355,7 +335,8 @@ class Mock(object):
             ### todo will reduce T
             K.loc[idx] = dwn_k = \
                 pd.DataFrame([downward_adj_func(st=s1, xt=k1, T=T, ) for s1, k1 in zip(s, k)],
-                             columns=['strike', 'status'], index=k.index)['strike']
+                             columns=['strike', 'status'],
+                             index=k.index)['strike']
             V.loc[idx] = [MockStrikePrice.cal_value(st, kt, r, sigma, T, I) for st, kt in zip(s, dwn_k)]
         return S, K, V
 
@@ -363,7 +344,6 @@ class Mock(object):
     def redeem_value(strike, stock, tc, r, interest_func):
         """
 
-        :param r:
         :param strike:
         :param stock:
         :param tc:
@@ -371,48 +351,70 @@ class Mock(object):
         :return:
         """
         n = 100 / strike
-        V = np.exp(-r * tc) * (n * stock + interest_func(tc))
+        V = np.exp(-r * tc) * (n * stock + interest_func(tc))  # 贴现率 * 当期价值
         return V
 
-    @staticmethod
-    def no_redeem_value(Bc, strike, stock, T, interest_func):
-        """
+    @classmethod
+    def no_redeem_value(cls, Bc, strike: np.array, stock: np.array, tc, r, interest_func):
+        n = 100 / strike[-1]
+        n * stock[-1]
+        cash_flow = max(Bc, n * stock)
 
-        :param Bc:
-        :param strike:
-        :param stock:
-        :param T:
-        :param interest_func:
-        :return:
-        """
-        n = 100 / strike
-        V = np.exp(-r * T) * (max(Bc, n * stock) + interest_func(T))
-        return V
+        pass
+
+    # @staticmethod
+    # def no_redeem_value(Bc, strike, stock, T, r, interest_func):
+    #     """
+    #
+    #     :param Bc:
+    #     :param strike:
+    #     :param stock:
+    #     :param T:
+    #     :param interest_func:
+    #     :return:
+    #     """
+    #     n = 100 / strike
+    #     V = np.exp(-r * T) * (max(Bc, n * stock) + interest_func(T))
+    #     return V
 
     @classmethod
     def check_path_value(cls, S, K, V, Bc, redeem=1.3, interest_func=lambda x: 0.015 * 100):
         redeem_mask = (S > redeem * K) * 1  # True redeemed, 符合赎回条件的路径
         redeem_status = redeem_mask.cumsum(axis=1) == 1  # 判断首次首次出现的位置
+        no_redeem = []
         for path, rede in enumerate(redeem_status.values):
             f = np.argwhere(rede == True)  # Find the indices of array elements that are non-zero, grouped by element.
-            if len(f) > 0:  # redeem
-                t = f[0][0]  # 取第一次出现符合赎回条件的时间点
+            if len(f) > 0:
+                # redeem
+                print(path, f[0][0])  # 取第一次出现符合赎回条件的时间点
+                t = f[0][0]
                 tc = t / 200
                 st = S.iloc[path, t]
                 kt = K.iloc[path, t]
                 yield path, cls.redeem_value(kt, st, tc, r, interest_func)
-            else:  # not redeem
-                st = S.iloc[path, -1]
-                kt = K.iloc[path, -1]
-                tc = S.shape[1] / 200
-                yield path, cls.no_redeem_value(Bc, kt, st, tc, interest_func)
+
+            else:
+                no_redeem.append([path, rede])
+                # not redeem
+                # LSM.step2_2(sn1_array, xn1_array, Bc, dt, r, interest, tm)
+                # st = S.iloc[path, -1]
+                # kt = K.iloc[path, -1]
+                # tc = S.shape[1] / 200
+                # yield path, cls.no_redeem_value(Bc, kt, st, tc, interest_func)
+        path = list(zip(*no_redeem))[0]
+        no_redeem_mask = S.index.isin(path)
+        cS = S[no_redeem_mask]
+        cK = K[no_redeem_mask]
+        yield LSM.method(cS, cK, r, Bc, interest_func)
 
     @classmethod
-    def mock(cls, st,xt, r, sigma, T, n, I, P, buyback_cond, redeem, Bc, interest_func):
+    def mock(cls, st, xt, r, sigma, T, n, I, P, buyback_cond, redeem, Bc, interest_func):
         S = Mock.init_stock_price(st, r, sigma, T, n=n)
         V = Mock.init_value(n)
         K = Mock.init_strike_price(xt, n=n)
-        S, K, V = Mock.check_dwnwrd(S, K, V, r=r, sigma=sigma, T=T, I=I, P=P,  # 回售触发价
+        S, K, V = Mock.check_dwnwrd(S, K, V, r=r, sigma=sigma, T=T,
+                                    I=I,
+                                    P=P,  # 回售触发价
                                     buyback_cond=buyback_cond)
 
         c = pd.DataFrame(list(Mock.check_path_value(S, K, V, Bc, redeem=redeem, interest_func=interest_func)),
@@ -426,12 +428,6 @@ class Mock(object):
         return res['value'].mean()
 
 
-# 需要考虑的
-# 1. 回售期
-# 2. 回售触发条件
-# 3. 转股期
-# 4. 赎回触发条件
-# 5. 下修条件
 if __name__ == '__main__':
     np.random.seed(1)
     # 九州转债
@@ -446,20 +442,13 @@ if __name__ == '__main__':
     Bc = 106  # 到期赎回价
     I = 0.015 * 100
     interest_func = lambda x: 0.015 * 100
-    redeem = 1.3 # 赎回
-
-    # print(st < xt * buyback_cond)
-    # # 触发修正价 18.72 = 23.4 * 0.8
-    # # sn = MockStockPath.create_sn(s, r, sigma, T, n=n)
-    # # kn = MockStrikePrice.init_strike_price(k, n)
-    # d_kt = MockStrikePrice.check_wthr_dwnwrd_adj(st, xt, r, sigma, T, I, P, buyback_cond)
-    # print(xt, d_kt)
-    S, K, V, res = Mock.mock(st,xt, r, sigma, T, n, I, P, buyback_cond, redeem, Bc, interest_func)
-    # S.to_csv('S.csv')
-    # K.to_csv('K.csv')
-    # V.to_csv('V.csv')
-    # res.to_csv('res.csv')
-    res2 = Mock.mock_avg(st,xt, r, sigma, T, n, I, P, buyback_cond, redeem, Bc, interest_func)
-    print(1)
+    redeem = 3  # 1.3
+    S = Mock.init_stock_price(st, r, sigma, T, n=n)
+    V = Mock.init_value(n)
+    K = Mock.init_strike_price(xt, n=n)
+    S, K, V = Mock.check_dwnwrd(S, K, V, r=r, sigma=sigma, T=T, I=I, P=P,  # 回售触发价
+                                buyback_cond=buyback_cond)
+    c = pd.DataFrame(list(Mock.check_path_value(S, K, V, Bc, redeem=redeem, interest_func=interest_func)),
+                     columns=['path', 'value'])
 
     pass
