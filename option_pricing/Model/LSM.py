@@ -199,22 +199,23 @@ class LSM(object):
     @classmethod
     def method(cls, cS, cK, r, Bc, interest_func, **kwargs):
         days = cS.columns
-        tm = int(days[-1].strip('day_'))
-        CashFlow, time = cls.step1(Bc, cS, cK, tm)  # init
-        CashFlow = CashFlow[f'day_{time}']
+        # tm = int(days[-1].strip('day_'))
+        CashFlow, time = cls.step1(Bc, cS, cK, days)  # init
+
         Time = pd.Series([time] * len(days), index=days)  # init
         Z = (100 / cK) * cS
         sorted_days = sorted(days, reverse=1, key=lambda x: int(x.strip('day_')))
         front = sorted_days[1:]
         end = sorted_days[:-1]
         dt = 1 / 250
-        for dayN1, dayN in zip(front, end):
+        for dayN1, dayN in zip(front, end):  # mapping every mock period
             cfn = CashFlow[dayN]  # skip N=200
             day_S = cS[dayN1]
             day_K = cK[dayN1]
             mask = day_S > day_K
             true_day_S = day_S[mask]
             if true_day_S.empty:
+                # no S >K day
                 pass
             else:
                 y = np.exp(-r * dt) * (cfn + interest_func(dt))
@@ -244,7 +245,7 @@ class LSM(object):
         pass
 
     @staticmethod
-    def step1(Bc, sn, xn, tm):
+    def step1(Bc, sn, xn, days):
         """
 
         :param Bc:
@@ -255,8 +256,10 @@ class LSM(object):
         """
 
         n = 100 / xn
+        day_int_list = list(map(lambda x: int(x.strip('day_')),days))
+        tm = max(day_int_list)
+        cash_flow = np.maximum(Bc, n * sn[[f'day_{tm}']])
 
-        cash_flow = np.maximum(Bc, n * sn)
         return cash_flow, tm
 
     @classmethod
