@@ -164,7 +164,7 @@ class MockStrikePrice(object):
 
     @classmethod
     # @file_cache()
-    def check_wthr_dwnwrd_adj(cls, st, xt, r, sigma, T, I, P, buyback_cond: float, force=False):
+    def check_wthr_dwnwrd_adj(cls, st, xt, r, sigma, T, I, P, buyback_cond: float, force=False, verbose=True):
         """
         st < 0.7xt
         ## todo 30/30 70%
@@ -182,129 +182,20 @@ class MockStrikePrice(object):
         warnings.warn('please correct judge func for  active buyback situation as 30/30 70%')
         warnings.warn('please correct interest func for interest')
         if force:
-            print('force cal downward-adjusted strike price')
+            if verbose:
+                print('force cal downward-adjusted strike price')
             return cls._cal_dwnwrd_adj(st, xt, r, sigma, T, I, P), 'force'
         # check whether active buyback situation
         if st < buyback_cond * xt:
-            print(' active buyback condition!')
-            print(st, buyback_cond * xt, st < buyback_cond * xt)
+            if verbose:
+                print(' active buyback condition!')
+                print(st, buyback_cond * xt, st < buyback_cond * xt)
             return cls._cal_dwnwrd_adj(st, xt, r, sigma, T, I, P), 'active'
 
         else:
-            print('not active buyback condition!')
+            if verbose:
+                print('not active buyback condition!')
             return xt, 'non-active'
-
-
-class LSM(object):
-    @classmethod
-    def method(cls, cS, cK, r, Bc, interest_func, **kwargs):
-        days = cS.columns
-        # tm = int(days[-1].strip('day_'))
-        CashFlow, time = cls.step1(Bc, cS, cK, days)  # init
-
-        Time = pd.Series([time] * len(days), index=days)  # init
-        Z = (100 / cK) * cS
-        sorted_days = sorted(days, reverse=1, key=lambda x: int(x.strip('day_')))
-        front = sorted_days[1:]
-        end = sorted_days[:-1]
-        dt = 1 / 250
-        for dayN1, dayN in zip(front, end):  # mapping every mock period
-            cfn = CashFlow[dayN]  # skip N=200
-            day_S = cS[dayN1]
-            day_K = cK[dayN1]
-            mask = day_S > day_K
-            true_day_S = day_S[mask]
-            if true_day_S.empty:
-                # no S >K day
-                pass
-            else:
-                y = np.exp(-r * dt) * (cfn + interest_func(dt))
-                tg_y = y[mask]
-                tg_z = Z[mask][dayN1]
-                tg_z2 = np.square(tg_z)
-                yz = pd.concat([tg_y, tg_z, tg_z2], axis=1)
-                yz.columns = ['y', 'z', 'z2']
-
-                model = OLS.from_formula('y ~ 1 + z + z2', data=yz).fit()
-                EYZ = model.fittedvalues
-
-                ez_mask = tg_z > EYZ
-                path_idx = ez_mask[ez_mask].index
-                if path_idx.empty:
-                    print('not update cashflow and time!')
-                else:
-                    for path in path_idx:
-                        update = tg_z[path]
-                        cfn[path] = update
-                    print(1)
-
-                print(1)
-                pass
-
-        print(1)
-        pass
-
-    @staticmethod
-    def step1(Bc, sn, xn, days):
-        """
-
-        :param Bc:
-        :param sn:
-        :param xn:
-        :param tm: period
-        :return:
-        """
-
-        n = 100 / xn
-        day_int_list = list(map(lambda x: int(x.strip('day_')),days))
-        tm = max(day_int_list)
-        cash_flow = np.maximum(Bc, n * sn[[f'day_{tm}']])
-
-        return cash_flow, tm
-
-    @classmethod
-    def step2_1(cls, sn1, xn1, Bc, dt, r, interest, tm):
-        """
-
-        :param tm:  period
-        :param Bc: 到期赎回价
-        :param sn1:  stock at n-1 period
-        :param xn1:  strike at n-1 period
-        :param dt:  duration between n and n-1 period
-        :param r: risk free
-        :param interest:  interest
-        :return:
-        """
-
-        z = (100 / xn1) * sn1  # 行权路径
-        cashflow = cls.step1(Bc, sn1, xn1, tm)
-        y = np.exp(-r * dt)(cashflow + interest)
-        return y, z
-
-    @classmethod
-    def step2_2(cls, sn1_array, xn1_array, Bc, dt, r, interest, tm):
-        """
-
-        :param sn1_array: array of stock at n-1 period
-        :param xn1_array: array of strike at n-1 period
-        :param tm:  period
-        :param Bc: 到期赎回价
-        :param dt:  duration between n and n-1 period
-        :param r: risk free
-        :param interest:  interest
-        :return:
-        """
-        mask = sn1_array > xn1_array
-        sn1_array_filter = sn1_array[mask]
-        xn1_array_filter = xn1_array[mask]
-        func = partial(cls.step2_1, Bc=Bc, dt=dt, r=r, interest=interest, tm=tm)
-        yz = pd.DataFrame([func(sn1, xn1) for sn1, xn1 in zip(sn1_array_filter, xn1_array_filter)], columns=['y', 'z'])
-        yz['z2'] = np.square(yz['z'])
-
-        from statsmodels.api import OLS
-        model = OLS.from_formula('y ~ 1 + z + z2', data=yz).fit()
-
-        pass
 
 
 class Mock(object):
@@ -396,19 +287,15 @@ class Mock(object):
                 kt = K.iloc[path, t]
                 yield path, cls.redeem_value(kt, st, tc, r, interest_func)
 
-            else:
+            else:  # not redeem
                 no_redeem.append([path, rede])
-                # not redeem
-                # LSM.step2_2(sn1_array, xn1_array, Bc, dt, r, interest, tm)
-                # st = S.iloc[path, -1]
-                # kt = K.iloc[path, -1]
-                # tc = S.shape[1] / 200
-                # yield path, cls.no_redeem_value(Bc, kt, st, tc, interest_func)
+
         path = list(zip(*no_redeem))[0]
         no_redeem_mask = S.index.isin(path)
         cS = S[no_redeem_mask]
         cK = K[no_redeem_mask]
-        yield LSM.method(cS, cK, r, Bc, interest_func)
+        for p, v in LSM.method(cS, cK, r, Bc, interest_func):
+            yield p, v
 
     @classmethod
     def mock(cls, st, xt, r, sigma, T, n, I, P, buyback_cond, redeem, Bc, interest_func):
@@ -431,6 +318,98 @@ class Mock(object):
         return res['value'].mean()
 
 
+class LSM(object):
+    @classmethod
+    def method(cls, cS, cK, r, Bc, interest_func, **kwargs):
+        """
+
+        :param cS:
+        :param cK:
+        :param r:
+        :param Bc:
+        :param interest_func:
+        :param kwargs:
+        :return:
+        """
+        days = cS.columns
+        # tm = int(days[-1].strip('day_'))
+        CashFlow, Time = cls.step1(Bc, cS, cK, days)  # init
+
+        Z = (100 / cK) * cS
+        sorted_days = sorted(days, reverse=1, key=lambda x: int(x.strip('day_')))
+        front, end = sorted_days[1:], sorted_days[:-1]
+
+        dt = 1
+        for dayN1, dayN in zip(front, end):  # mapping every mock period
+            # cfn = CashFlow  # skip N=200
+            day_S = cS[dayN1]
+            day_K = cK[dayN1]
+            mask = day_S > day_K
+
+            if day_S[mask].empty:
+                #
+                msg = "no S >K day, will not change cashflow"
+                print(msg)
+                pass
+            else:
+                y = np.exp(-r * dt) * (CashFlow + interest_func(dt))
+                tg_y = y[mask]  # filter S > K day;
+                tg_z = Z[dayN1][mask]
+                tg_z2 = np.square(tg_z)
+                yz = pd.concat([tg_y, tg_z, tg_z2], axis=1)
+                yz.columns = ['y', 'z', 'z2']
+
+                model = OLS.from_formula('y ~ 1 + z + z2', data=yz).fit()
+                EYZ = model.fittedvalues
+
+                ez_mask = tg_z > EYZ
+                path_idx = tg_z[ez_mask].index
+                if path_idx.empty:
+                    print('not update cashflow and time!')
+                else:
+                    n1 = int(dayN1.strip('day_'))
+                    for path in path_idx:
+                        update = tg_z[path]
+                        CashFlow[path] = update
+                        Time[path] = n1
+        CashFlowTime = pd.concat([CashFlow, Time], axis=1)
+        for path, (cf, t) in CashFlowTime.iterrows():
+            y = np.exp(-r * t) * (cf + interest_func(t))
+            yield path, y
+
+    @staticmethod
+    def step1(Bc, sn, xn, days):
+        """
+
+        :param Bc:
+        :param sn:
+        :param xn:
+        :param tm: period
+        :return:
+        """
+
+        day_int_list = list(map(lambda x: int(x.strip('day_')), days))
+        tm = max(day_int_list)
+        n = 100 / xn[f'day_{tm}']
+        cash_flow = np.maximum(Bc, n * sn[f'day_{tm}'])
+        Time = pd.Series([tm] * xn.shape[0], index=n.index)  # init
+        return cash_flow, Time
+
+    @classmethod
+    def run(cls, Bc, st, r, sigma, T, buyback_cond, redeem, P, I, interest_func: object, n=(1000, 200), avg=True):
+        S = Mock.init_stock_price(st, r, sigma, T, n=n)
+        V = Mock.init_value(n)
+        K = Mock.init_strike_price(xt, n=n)
+        S, K, V = Mock.check_dwnwrd(S, K, V, r=r, sigma=sigma, T=T, I=I, P=P,  # 回售触发价
+                                    buyback_cond=buyback_cond)
+        mock_c = pd.DataFrame(list(Mock.check_path_value(S, K, V, Bc, redeem=redeem, interest_func=interest_func)),
+                              columns=['path', 'value']).set_index('path').sort_index()
+        if avg:
+            return mock_c['value'].mean()
+        else:
+            return mock_c
+
+
 if __name__ == '__main__':
     np.random.seed(1)
     # 九州转债
@@ -446,12 +425,13 @@ if __name__ == '__main__':
     I = 0.015 * 100
     interest_func = lambda x: 0.015 * 100
     redeem = 3  # 1.3
-    S = Mock.init_stock_price(st, r, sigma, T, n=n)
-    V = Mock.init_value(n)
-    K = Mock.init_strike_price(xt, n=n)
-    S, K, V = Mock.check_dwnwrd(S, K, V, r=r, sigma=sigma, T=T, I=I, P=P,  # 回售触发价
-                                buyback_cond=buyback_cond)
-    c = pd.DataFrame(list(Mock.check_path_value(S, K, V, Bc, redeem=redeem, interest_func=interest_func)),
-                     columns=['path', 'value'])
-
-    pass
+    # S = Mock.init_stock_price(st, r, sigma, T, n=n)
+    # V = Mock.init_value(n)
+    # K = Mock.init_strike_price(xt, n=n)
+    # S, K, V = Mock.check_dwnwrd(S, K, V, r=r, sigma=sigma, T=T, I=I, P=P,  # 回售触发价
+    #                             buyback_cond=buyback_cond)
+    # mock_c = pd.DataFrame(list(Mock.check_path_value(S, K, V, Bc, redeem=redeem, interest_func=interest_func)),
+    #                       columns=['path', 'value']).set_index('path').sort_index()
+    # c_avg = mock_c['value'].mean()
+    c_avg = LSM.run(Bc, st, r, sigma, T, buyback_cond, redeem, P, I, interest_func, n=n, avg=True)
+    print(1)
