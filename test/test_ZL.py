@@ -1,6 +1,6 @@
 import unittest
 
-from option_pricing.Model.ZL import MockStrikePrice
+from option_pricing_analysis.Model.ZL import MockStrikePrice
 
 
 class MyTestCaseMockStrikePriceDwnAdj(unittest.TestCase):
