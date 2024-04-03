@@ -3,7 +3,7 @@ from option_pricing_analysis.Model.BSM import ImpliedVolatility, OptionPricing
 
 
 def map_cal_option_iv(df):
-    ivfunc = ImpliedVolatility(pricing_f=OptionPricing())
+    ivfunc = ImpliedVolatility(pricing_model=OptionPricing())
 
     func = ivfunc.implied_volatility_brent
 
