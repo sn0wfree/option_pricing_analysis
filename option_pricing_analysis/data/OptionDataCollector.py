@@ -278,7 +278,7 @@ class Collector(object):
         this function is to prepare collect data from api high frequency
         rewrite the self.watchlist for further collection
         :param TargetAssetsCode: Underlying Code
-        :return: tasks;
+        :return: download_hq_quote;
         """
 
         sssO = self.startOnce(TargetAssetsCode=TargetAssetsCode)
@@ -293,7 +293,7 @@ class Collector(object):
     def regularGetGI(self, watchlist, RequestTimeStamp, Optimizer=True):
         """
         this method is to regularly requests real-time Option greek indicators
-        :param watchlist: the list of required tasks
+        :param watchlist: the list of required download_hq_quote
         :param RequestTimeStamp:  the stamp of request time
         :param Optimizer: Bool, Optimizer
         :return: dataframe (Greeks)
@@ -307,7 +307,7 @@ class Collector(object):
     def regularGetRTOQ(self, watchlist, RequestTimeStamp, merge=True, Optimizer=False):
         """
         this method is to regularly requests real-time Option Quotes time
-        :param watchlist: the list of required tasks
+        :param watchlist: the list of required download_hq_quote
         :param RequestTimeStamp: the stamp of request time
         :param merge: Bool. decide whether merge as one dataframe or as list ;Default True
         :param Optimizer: Bool, Optimizer
