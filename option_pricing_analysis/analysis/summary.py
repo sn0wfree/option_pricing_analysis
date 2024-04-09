@@ -1,7 +1,9 @@
+import datetime
 
 import pandas as pd
-import datetime
-from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper,ReportAnalyst
+
+from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst
+
 
 def cal_profits_returns(person_holder):
     nv_df = pd.DataFrame(index=person_holder.index)
@@ -10,13 +12,14 @@ def cal_profits_returns(person_holder):
 
     periods = {'当日': 1, '近一周': 5, '近一月': 20}
 
+
 if __name__ == '__main__':
     today_str = pd.to_datetime(datetime.datetime.today()).strftime('%Y%m%d')
 
     wh = WindHelper()
 
     PR = ReportAnalyst(
-        report_file_path='E:\\prt\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
+        report_file_path='C:\\Users\\linlu\\Documents\\GitHub\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'HO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'IO\d{4}-[CP]-[0-9]+.CFE': 'll',

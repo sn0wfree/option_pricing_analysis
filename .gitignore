@@ -131,3 +131,4 @@ dmypy.json
 .pypirc
 *.xlsx
 *.cache
+*.sqlite
