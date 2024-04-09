@@ -1182,6 +1182,7 @@ class SummaryFunctions(object):
 
 class ReportAnalyst(ProcessReport, SummaryFunctions):
     def groupby_person_summary(self, info_dict, merged_summary_dict):
+        contracts = self.reduced_contracts()
         person_link_df = pd.DataFrame(
             list(self.contract_link_person(contracts, contract_2_person_rule=self.contract_2_person_rule)),
             columns=['contract', 'person', 'symbol', 'commodity'])
