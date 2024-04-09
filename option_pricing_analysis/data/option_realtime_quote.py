@@ -6,7 +6,8 @@ import akshare as ak
 
 import pandas as pd
 import json
-
+import aiohttp
+import gevent
 
 def get_zz1000_code():
     option_cffex_zz1000_list_sina_df = ak.option_cffex_zz1000_list_sina()
@@ -89,7 +90,15 @@ def _parse_text(data_text):
     return data_df
 
 
-def option_cffex_zz1000_spot_sina(symbol_list: (list, tuple) = ["mo2208"]) -> pd.DataFrame:
+
+async def async_get(url):
+
+    async with ClientSession() as session:
+        async with session.get(url) as response:
+            res = await response.text()
+            return res
+
+def option_cffex_zz1000_spot_sina(symbol_list: (list, tuple) = ["mo2208",]) -> pd.DataFrame:
     """
     中金所-中证 1000 指数-指定合约-实时行情
     https://stock.finance.sina.com.cn/futures/view/optionsCffexDP.php
@@ -105,8 +114,9 @@ def option_cffex_zz1000_spot_sina(symbol_list: (list, tuple) = ["mo2208"]) -> pd
     return _parse_text(data_text)
 
 
-option_cffex_zz1000_spot_sina_df = ak.option_cffex_zz1000_spot_sina(symbol="mo2208")
-print(option_cffex_zz1000_spot_sina_df)
+
 
 if __name__ == '__main__':
+    option_cffex_zz1000_spot_sina_df = ak.option_cffex_zz1000_spot_sina(symbol="mo2208")
+    print(option_cffex_zz1000_spot_sina_df)
     pass
