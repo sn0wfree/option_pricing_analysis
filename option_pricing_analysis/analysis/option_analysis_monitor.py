@@ -827,7 +827,7 @@ class ProcessReportSingle(ProcessReportLoadingTools, ProcessReportDataTools):  #
     def reduced_transactions(self):
         transactions = self._transactions
         transactions['amt_100'] = transactions['手数'] * transactions['成交均价']
-        out = transactions.groupby(['委托合约', '买卖', '开平', '报单日期'])['手数', 'amt_100'].sum().reset_index()
+        out = transactions.groupby(['委托合约', '买卖', '开平', '报单日期'])[['手数', 'amt_100']].sum().reset_index()
         out['成交均价'] = out['amt_100'] / out['手数']
         output_cols = ['委托合约', '买卖', '开平', '报单日期', '手数', '成交均价']
         return out[output_cols]
@@ -953,9 +953,11 @@ class ProcessReport(ProcessReportSingle):
         transactions = self.create_transactions(lastdel_multi, reduced=True, return_df=True,
                                                 trade_type_mark=trade_type_mark)
 
-        result_holder = [DerivativesItem.parse_bo2sc_so2pc(lastdel_multi, contract, sub_transaction, quote,
-                                                           return_dict=False) for contract, sub_transaction in
-                         transactions.groupby(['委托合约'])]
+        result_holder = [
+            DerivativesItem.parse_bo2sc_so2pc(lastdel_multi, contract, sub_transaction, quote, return_dict=False) for
+            contract, sub_transaction in
+            transactions.groupby('委托合约')
+        ]
 
         l1, l2, l3, l4, l5, l6, s1, s2, s3, s4, s5, s6 = list(zip(*result_holder))
 
