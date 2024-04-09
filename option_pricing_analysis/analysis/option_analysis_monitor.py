@@ -746,8 +746,9 @@ class ProcessReportDataTools(object):
         for underlying in lastdeliv_and_multi['UNDERLYINGWINDCODE'].dropna().unique():
             if underlying not in got:
                 q = \
-                wind_helper.wind_wsd_quote_reduce(underlying, min_start_dt, today, required_cols=('close',)).dropna()[
-                    'CLOSE'].to_frame(underlying)
+                    wind_helper.wind_wsd_quote_reduce(underlying, min_start_dt, today,
+                                                      required_cols=('close',)).dropna()[
+                        'CLOSE'].to_frame(underlying)
                 q.index.name = 'date'
                 yield q
 
@@ -1303,6 +1304,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
 
     def summary_person_info(self, person_summary_dict: dict, merged_summary_dict: dict, ):
         person_holder = {}
+        contracts = PR.reduced_contracts()
         person_link_df = pd.DataFrame(
             list(self.contract_link_person(contracts, contract_2_person_rule=self.contract_2_person_rule)),
             columns=['contract', 'person', 'symbol', 'commodity'])
