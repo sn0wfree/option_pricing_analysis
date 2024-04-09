@@ -153,7 +153,7 @@ class Tools(object):
         for name, pattern_str in pattern_rule_dict.items():
             if re.compile(pattern_str).match(code):
                 return name
-            elif re.compile(pattern_str.replace('+-','+').replace(']-',']')).match(code):
+            elif re.compile(pattern_str.replace('+-', '+').replace(']-', ']')).match(code):
                 return name
         else:
             return 'Unknown'
@@ -745,7 +745,8 @@ class ProcessReportDataTools(object):
         # 获取underlyling 行情
         for underlying in lastdeliv_and_multi['UNDERLYINGWINDCODE'].dropna().unique():
             if underlying not in got:
-                q = wind_helper.wind_wsd_quote_reduce(underlying, min_start_dt, today, required_cols=('close',)).dropna()[
+                q = \
+                wind_helper.wind_wsd_quote_reduce(underlying, min_start_dt, today, required_cols=('close',)).dropna()[
                     'CLOSE'].to_frame(underlying)
                 q.index.name = 'date'
                 yield q
@@ -1211,7 +1212,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             person_holder[person] = res
         return person_holder, person_ls_summary_dict
 
-    def groupby_contract_summary(self, commodity_contract_df):
+    def groupby_contract_summary(self, info_dict, commodity_contract_df):
         contract_summary_dict = {}
         merged_summary_dict = {}
         for commodity, dfdd in commodity_contract_df.groupby('commodity'):
@@ -1247,7 +1248,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
         commodity_contract_df = pd.DataFrame(list(self.contract_link_commodity(contracts, )),
                                              columns=['contract', 'symbol', 'commodity'])
 
-        contract_summary_dict, merged_summary_dict = self.groupby_contract_summary(commodity_contract_df)
+        contract_summary_dict, merged_summary_dict = self.groupby_contract_summary(info_dict, commodity_contract_df)
 
         person_holder_dict, person_ls_summary_dict = self.groupby_person_summary(info_dict, merged_summary_dict)
 
