@@ -6,6 +6,13 @@ import pandas as pd
 from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst
 
 
+def chunk(obj, chunks=2000):
+    if hasattr(obj, '__len__'):
+        length = len(obj)
+        for i in range(0, length, chunks):
+            yield obj[i:i + chunks]
+
+
 def cal_periods_result(df, col):
     periods_results = {}
     # 根据列名分别计算
@@ -45,14 +52,14 @@ def process_ph(person_holder):
     target_col = ['累计收益', '累计收益率', '当日收益', '当日收益率',
                   '近一周收益', '近一周收益率', '近一月收益', '近一月收益率']
 
-    base_cols = ['累计净损益(右轴)', '累计净值']
+    base_cols = ['累计净值', '累计净损益(右轴)', ]
 
     for prsn, df in person_holder.items():
 
-        filtered_col = base_cols + df.columns.tolist()[8:]
+        filtered_col = base_cols + sorted(df.columns.tolist()[8:])
         # filtered_col = [item for item in df.columns if "损益" in item or "净值" in item]
         person_dict = {}  # pd.DataFrame(columns=target_col)
-        for pnl_col, nv_col in zip(filtered_col[:-1], filtered_col[1:]):
+        for nv_col, pnl_col in chunk(filtered_col, 2):
             metrics_info = cal_periods_result_v2(df, pnl_col, nv_col)
             name = nv_col[:2]
             person_dict[(prsn, name)] = metrics_info
@@ -60,7 +67,7 @@ def process_ph(person_holder):
             #     if metric in person_df.columns:
             # person_df.at[(pnl_col, nv_col), metric] = metrics_info[metric]
         all_person_dfs.append(pd.DataFrame(person_dict).T[target_col])
-    full_summary_df = pd.concat(all_person_dfs, axis=0, keys=person_holder.keys())
+    full_summary_df = pd.concat(all_person_dfs, axis=0)
 
     # for key in person_holder.keys():
     #     if '累计' in full_summary_df.index:
@@ -91,9 +98,9 @@ def check_contract_conditions(info_dict, dict_index):
     return list(holding_contracts_cols)
 
 
-def check_contract_conditions_v2(info_dict, dict_index):
+def check_contract_conditions_v2(sub_dict):
     holding_contracts_cols = set()
-    for df_name, df in info_dict.maps[dict_index].items():
+    for df_name, df in sub_dict.items():
         # df_diff = df.diff(1)
         for column in df.columns:
             if df[column].isnull().all():
@@ -112,8 +119,8 @@ def check_contract_conditions_v2(info_dict, dict_index):
 
 
 def holding_info(info_dict):
-    for dict_index in range(len(info_dict.maps)):
-        checked_columns = check_contract_conditions_v2(info_dict, dict_index)
+    for sub_dict in info_dict.maps:
+        checked_columns = check_contract_conditions_v2(sub_dict)
         info_dict.maps[dict_index]['checked_columns'] = checked_columns
 
 
@@ -209,12 +216,18 @@ def output_summary(person_holder, info_dict, lastdel_multi, base_store_path=None
 
 
 if __name__ == '__main__':
+    import yaml
+
+    path = os.path.join(os.path.split(__file__)[0], 'config.yml')
+
+    with open(path, 'r', encoding="utf-8") as f:
+        config = yaml.load(f.read(), Loader=yaml.FullLoader)
     today_str = pd.to_datetime(datetime.datetime.today()).strftime('%Y%m%d')
 
     wh = WindHelper()
 
     PR = ReportAnalyst(
-        report_file_path='E:\\prt\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
+        report_file_path=config['report_file_path'],
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'HO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'IO\d{4}-[CP]-[0-9]+.CFE': 'll',
