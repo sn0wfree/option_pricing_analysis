@@ -214,7 +214,7 @@ if __name__ == '__main__':
     wh = WindHelper()
 
     PR = ReportAnalyst(
-        report_file_path='C:\\Users\\linlu\\Documents\\GitHub\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
+        report_file_path='E:\\prt\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'HO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'IO\d{4}-[CP]-[0-9]+.CFE': 'll',
