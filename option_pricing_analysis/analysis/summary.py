@@ -98,60 +98,93 @@ def check_contract_conditions(info_dict, dict_index):
     return list(holding_contracts_cols)
 
 
-def check_contract_conditions_v2(sub_dict):
-    holding_contracts_cols = set()
-    for df_name, df in sub_dict.items():
-        # df_diff = df.diff(1)
-        for column in df.columns:
-            if df[column].isnull().all():
-                continue
-            # 检查是否是累计净损益或累计平仓价值的DataFrame
-            if '累计净损益' in df_name or '累计平仓价值' in df_name:
-                # 执行最新值-前值是否为0的判断
-                if df[column].iloc[-1] - df[column].iloc[-2] != 0:
-                    holding_contracts_cols.add(column)
-            # 检查是否是剩余合约数的DataFrame
-            elif '剩余份数' in df_name:
-                # 执行最新值是否为0的判断
-                if df[column].iloc[-1] != 0:
-                    holding_contracts_cols.add(column)
-    return list(holding_contracts_cols)
+# def check_contract_condition_executed(df):
+#     return df[df.tail(1) != 0].tail(1).dropna(axis=1)
 
 
-def holding_info(info_dict):
-    for sub_dict in info_dict.maps:
-        checked_columns = check_contract_conditions_v2(sub_dict)
-        info_dict.maps[dict_index]['checked_columns'] = checked_columns
+def check_contract_condition_closed_value(df):
+    return df[df.diff(1).tail(1) != 0].tail(1).dropna(axis=1)
 
 
-def cal_today_result(df1, df2, df3, df4, df5, checked_cols, lastdel_multi):
-    df1 = list(df1.values())[0]
-    df2 = list(df2.values())[0]
-    df3 = list(df3.values())[0]
-    df4 = list(df4.values())[0]
-    df5 = list(df5.values())[0]
+def check_contract_condition_all_zero(df):
+    return df[df.isnull().all()].tail(1).dropna(axis=1)
+
+
+def check_contract_condition_resid_shares(df):
+    return df[df.tail(1) != 0].tail(1).dropna(axis=1)
+
+
+def _map_dict_get(keys, dictitems):
+    for key in keys:
+        val = dictitems.get(key, None)
+        if isinstance(val, pd.DataFrame):
+            return val
+    else:
+        raise KeyError(f"{keys} not in dict!")
+
+
+1
+
+
+def _map_dict_get_funcs(keys, dictitems, func):
+    return func(_map_dict_get(keys, dictitems))
+
+
+def check_contract_conditions_v2(sub_dict, reduce=False):
+    holding_contracts_cols = []
+
+    cum_closed_value = ['衍生品多头累计平仓价值', '衍生品空头累计平仓价值']
+    cum_pnl = ['衍生品多头累计净损益', '衍生品空头累计净损益']
+    share = ['衍生品多头剩余份数', '衍生品空头剩余份数']
+    executed = ['衍生品多头累计行权收益', '衍生品空头累计行权收益']
+
+    closed_value_mask = _map_dict_get_funcs(cum_closed_value, sub_dict, check_contract_condition_closed_value)
+    holding_contracts_cols.extend(closed_value_mask.columns.tolist())
+
+    cum_pnl_mask = _map_dict_get_funcs(cum_pnl, sub_dict, check_contract_condition_closed_value)
+    holding_contracts_cols.extend(cum_pnl_mask.columns.tolist())
+
+    share_mask = _map_dict_get_funcs(share, sub_dict, check_contract_condition_resid_shares)
+    holding_contracts_cols.extend(share_mask.columns.tolist())
+
+    executed_mask = _map_dict_get_funcs(executed, sub_dict, check_contract_condition_resid_shares)
+    executed_code = set(executed_mask.columns.tolist())
+    # holding_contracts_cols.extend(share_mask.columns.tolist())
+
+    # share_mask = _map_dict_get_funcs(share, sub_dict, check_contract_condition_resid_shares)
+    holding_contracts_cols = set(holding_contracts_cols) - executed_code if reduce else holding_contracts_cols
+
+    return set(holding_contracts_cols)
+
+
+def cal_today_result(holding_value_df, cum_closed_value_df,
+                     cum_pnl_df, cum_cost_df, share_df, checked_cols, lastdel_multi, ls):
+    # holding_value_df, cum_closed_value_df,
+    # cum_pnl_df, cum_cost_df, share_df
+
     today_result = {}
     for col in checked_cols:
         cm = lastdel_multi.loc[col, 'CONTRACTMULTIPLIER']
 
-        today_profit_loss = df3[col].iloc[-1] - df3[col].iloc[-2]
+        today_profit_loss = cum_pnl_df[col].iloc[-1] - cum_pnl_df[col].iloc[-2]
 
         # 当日累计收益率涨跌幅
-        today_open_cost = abs(df4[col].iloc[-1])  # 累计开仓成本
-        prev_open_cost = abs(df4[col].iloc[-2] if df4[col].shape[0] > 1 else today_open_cost)  # 前一日累计开仓成本，如有
+        today_open_cost = abs(cum_cost_df[col].iloc[-1])  # 累计开仓成本
+        prev_open_cost = abs(
+            cum_cost_df[col].iloc[-2] if cum_cost_df[col].shape[0] > 1 else today_open_cost)  # 前一日累计开仓成本，如有
         if prev_open_cost != 0:
-            today_total_return_change = (1 + df3[col].iloc[-1] / today_open_cost) / (
-                    1 + df3[col].iloc[-2] / prev_open_cost) - 1
+            today_total_return_change = (1 + cum_pnl_df[col].iloc[-1] / today_open_cost) / (
+                    1 + cum_pnl_df[col].iloc[-2] / prev_open_cost) - 1
         else:
             today_total_return_change = float('nan')  # 如果前一日累计开仓成本为零
         # 持仓合约数
-        num_contracts = df5[col].iloc[-1] / cm
+        num_contracts = share_df[col].iloc[-1] / cm
         # 持仓名义市值
-        nominal_value = abs(df1[col].iloc[-1])
+        nominal_value = abs(holding_value_df[col].iloc[-1])
         # 平仓价值
-        closing_value = abs(df2[col].iloc[-1])
+        closing_value = abs(cum_closed_value_df[col].iloc[-1])
         # 累计净损益
-        cum_profit_loss = df3[col].iloc[-1]
+        cum_profit_loss = cum_pnl_df[col].iloc[-1]
         # 累计净损益（%）
         if today_open_cost != 0:
             cum_profit_loss_perc = cum_profit_loss / today_open_cost
@@ -159,6 +192,7 @@ def cal_today_result(df1, df2, df3, df4, df5, checked_cols, lastdel_multi):
             cum_profit_loss_perc = float('nan')  # 如果累计开仓成本为零
 
         today_result[col] = {
+            '持仓方向': ls,
             '持仓手数': num_contracts,
             '当日损益': today_profit_loss,
             '当日累计收益率涨跌幅': today_total_return_change,
@@ -167,48 +201,83 @@ def cal_today_result(df1, df2, df3, df4, df5, checked_cols, lastdel_multi):
             '累计净损益': cum_profit_loss,
             '累计净损益（%）': cum_profit_loss_perc
         }
-        indicators_today = pd.DataFrame(today_result).T
-        mask = (indicators_today['持仓名义市值'] != 0) | (indicators_today['平仓价值'] != 0)
+    indicators_today = pd.DataFrame(today_result).T.sort_index()
+    mask = (indicators_today['持仓名义市值'] != 0) | (indicators_today['平仓价值'] != 0)
     return indicators_today[mask]
 
 
-def holding_contract_info(info_dict, lastdel_multi):
-    holding_info(info_dict)
-    holding_summary_info = {}
-    for dict_index, data_dict in enumerate(info_dict.maps):
-        holding_contracts_cols = data_dict.get('checked_columns', [])
+def c2p_p2c(p2c):
+    for k, vs in p2c.items():
+        for v in vs:
+            yield v, k
 
-        df1 = {key: value for key, value in data_dict.items() if '持仓价值' in key}  # 包含持仓价值
-        df2 = {key: value for key, value in data_dict.items() if '累计平仓价值' in key}  # 包含累计平仓价值
-        df3 = {key: value for key, value in data_dict.items() if '累计净损益' in key}  # 包含累计净损益
-        df4 = {key: value for key, value in data_dict.items() if '累计开仓成本' in key}  # 包含累计开仓成本
-        df5 = {key: value for key, value in data_dict.items() if '剩余份数' in key}  # 剩余合约数
 
-        indicators_df = cal_today_result(df1, df2, df3, df4, df5, holding_contracts_cols, lastdel_multi)
-        holding_summary_info[dict_index] = indicators_df
+def holding_contract_info(info_dict, lastdel_multi, c2p):
+    cum_closed_value = ['衍生品多头累计平仓价值', '衍生品空头累计平仓价值']
+    cum_pnl = ['衍生品多头累计净损益', '衍生品空头累计净损益']
+    share = ['衍生品多头剩余份数', '衍生品空头剩余份数']
+    executed = ['衍生品多头累计行权收益', '衍生品空头累计行权收益']
+    holding_value = ['衍生品多头持仓价值', '衍生品空头持仓价值']
+    cum_cost = ['衍生品多头累计开仓成本', '衍生品空头累计开仓成本']
+
+    holding_summary_info = []
+
+    for sub_dict in info_dict.maps:
+        # 拆分空头和多头分开处理
+        ls = list(sub_dict.keys())[0][3:5]
+        holding_contracts_cols = check_contract_conditions_v2(sub_dict)
+
+        # df1 = {key: value for key, value in sub_dict.items() if '持仓价值' in key}  # 包含持仓价值
+        holding_value_df = _map_dict_get(holding_value, sub_dict)
+
+        # df2 = {key: value for key, value in sub_dict.items() if '累计平仓价值' in key}  # 包含累计平仓价值
+        cum_closed_value_df = _map_dict_get(cum_closed_value, sub_dict)
+
+        # df3 = {key: value for key, value in sub_dict.items() if '累计净损益' in key}  # 包含累计净损益
+        cum_pnl_df = _map_dict_get(cum_pnl, sub_dict)
+
+        # df4 = {key: value for key, value in sub_dict.items() if '累计开仓成本' in key}  # 包含累计开仓成本
+        cum_cost_df = _map_dict_get(cum_cost, sub_dict)
+
+        # df5 = {key: value for key, value in sub_dict.items() if '剩余份数' in key}  # 剩余合约数
+        share_df = _map_dict_get(share, sub_dict)
+
+        indicators_df = cal_today_result(holding_value_df, cum_closed_value_df,
+                                         cum_pnl_df, cum_cost_df, share_df,
+                                         holding_contracts_cols, lastdel_multi, ls)
+
+        indicators_df.index = list(map(lambda x: (c2p.get(x[:2], None), x), indicators_df.index))
+        holding_summary_info.append(indicators_df)
 
     return holding_summary_info
 
 
 ##输出
-def summary_output_file_path(output_path='./'):
-    if output_path is None:
-        output_path = './'
+def create_summary_output_file_path(output_path='./'):
+    output_path = './' if output_path is None else output_path
     today_str = pd.to_datetime(datetime.datetime.today()).strftime('%Y%m%d')
     output_name_format = f'输出指标统计@{today_str}.xlsx'
     _path = os.path.join(output_path, output_name_format)
-
     return _path
 
 
 def output_summary(person_holder, info_dict, lastdel_multi, base_store_path=None, return_data=False):
-    store_path = summary_output_file_path(output_path=base_store_path)
-
     person_contract_summary = process_ph(person_holder)
-    holding_contracts_summary = holding_contract_info(info_dict, lastdel_multi)
+
+    p2c = {pp: set(map(lambda x: x[:2], df.columns.tolist()[8:])) for pp, df in person_holder.items()}
+
+    c2p = dict(c2p_p2c(p2c))
+
+    holding_contracts_summary = holding_contract_info(info_dict, lastdel_multi, c2p)
+
+    holding_contracts_summary_merged = pd.concat(holding_contracts_summary + [person_contract_summary],
+                                                 axis=0).sort_index()
+
+    store_path = create_summary_output_file_path(output_path=base_store_path)
 
     with pd.ExcelWriter(store_path) as f:
         person_contract_summary.to_excel(f, sheet_name='整体统计输出')
+        holding_contracts_summary_merged.to_excel(f, sheet_name='整体统计输出2')
         holding_contracts_summary[0].to_excel(f, sheet_name='衍生品多头截面持仓合约统计')
         holding_contracts_summary[1].to_excel(f, sheet_name='衍生品空头截面持仓合约统计')
     if return_data:
@@ -222,6 +291,7 @@ if __name__ == '__main__':
 
     with open(path, 'r', encoding="utf-8") as f:
         config = yaml.load(f.read(), Loader=yaml.FullLoader)
+
     today_str = pd.to_datetime(datetime.datetime.today()).strftime('%Y%m%d')
 
     wh = WindHelper()
