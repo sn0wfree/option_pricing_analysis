@@ -1,10 +1,9 @@
 import datetime
-
 import os
+
 import pandas as pd
 
 from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst
-
 
 
 def cal_periods_result(df, col):
@@ -24,36 +23,81 @@ def cal_periods_result(df, col):
     return periods_results
 
 
+def cal_periods_result_v2(df, pnl_col, nv_col):
+    periods_results = {}
+    # 根据列名分别计算
+
+    periods_results['累计收益'] = df[pnl_col].iloc[-1]
+    periods_results['当日收益'] = df[pnl_col].diff(periods=1).iloc[-1]
+    periods_results['近一周收益'] = df[pnl_col].diff(periods=5).iloc[-1]
+    periods_results['近一月收益'] = df[pnl_col].diff(periods=20).iloc[-1]
+
+    periods_results['累计收益率'] = df[nv_col].iloc[-1] - 1
+    periods_results['当日收益率'] = df[nv_col].pct_change(periods=1).iloc[-1]
+    periods_results['近一周收益率'] = df[nv_col].pct_change(periods=5).iloc[-1]
+    periods_results['近一月收益率'] = df[nv_col].pct_change(periods=20).iloc[-1]
+
+    return periods_results
+
+
 def process_ph(person_holder):
-    all_person_dfs = {}
-    for key in person_holder.keys():
-        target_col = ['累计收益', '累计收益率', '当日收益', '当日收益率', '近一周收益', '近一周收益率', '近一月收益',
-                   '近一月收益率']
+    all_person_dfs = []
+    # target_col = ['累计收益', '累计收益率', '当日收益', '当日收益率',
+    #               '近一周收益', '近一周收益率', '近一月收益', '近一月收益率']
 
-        filtered_col = [item for item in person_holder[key].columns if "损益" in item or "净值" in item]
-        person_df = pd.DataFrame(columns=target_col)
+    base_cols = ['累计净损益(右轴)', '累计净值']
 
-        for col in filtered_col:
-            metrics_info = cal_periods_result(person_holder[key], col)
-            row_index = col[:2]
-            for metric in metrics_info:
-                if metric in person_df.columns:
-                    person_df.at[row_index, metric] = metrics_info[metric]
+    for prsn, df in person_holder.items():
 
-        all_person_dfs[key] = person_df
-        full_summary_df = pd.concat(all_person_dfs.values(), axis=0, keys=all_person_dfs.keys())
+        filtered_col = base_cols + df.columns.tolist()[8:]
 
-    for key in person_holder.keys():
-        if '累计' in full_summary_df.index:
-            full_summary_df = full_summary_df.rename(index={'累计': key})
+        # filtered_col = [item for item in df.columns if "损益" in item or "净值" in item]
+        person_dict = {}  # pd.DataFrame(columns=target_col)
+
+        for pnl_col, nv_col in zip(filtered_col[:-1], filtered_col[1:]):
+            metrics_info = cal_periods_result_v2(df, pnl_col, nv_col)
+            name = nv_col[:2]
+            person_dict[(prsn, name)] = metrics_info
+            # for metric in metrics_info:
+            #     if metric in person_df.columns:
+            # person_df.at[(pnl_col, nv_col), metric] = metrics_info[metric]
+
+        all_person_dfs.append(pd.DataFrame(person_dict).T)
+    full_summary_df = pd.concat(all_person_dfs, axis=0, keys=person_holder.keys())
+
+    # for key in person_holder.keys():
+    #     if '累计' in full_summary_df.index:
+    #         full_summary_df = full_summary_df.rename(index={'累计': key})
 
     return full_summary_df
+
 
 ##单个合约
 def check_contract_conditions(info_dict, dict_index):
     target_dict = info_dict.maps[dict_index]
     holding_contracts_cols = set()
     for df_name, df in target_dict.items():
+        for column in df.columns:
+            if df[column].isnull().all():
+                continue
+            # 检查是否是累计净损益或累计平仓价值的DataFrame
+            ## todo: df中不存在累计净损益，第一个条件无效
+            if '累计净损益' in df_name or '累计平仓价值' in df_name:
+                # 执行最新值-前值是否为0的判断
+                if df[column].iloc[-1] - df[column].iloc[-2] != 0:
+                    holding_contracts_cols.add(column)
+            # 检查是否是剩余合约数的DataFrame
+            elif '剩余份数' in df_name:
+                # 执行最新值是否为0的判断
+                if df[column].iloc[-1] != 0:
+                    holding_contracts_cols.add(column)
+    return list(holding_contracts_cols)
+
+
+def check_contract_conditions_v2(info_dict, dict_index):
+    holding_contracts_cols = set()
+    for df_name, df in info_dict.maps[dict_index].items():
+        # df_diff = df.diff(1)
         for column in df.columns:
             if df[column].isnull().all():
                 continue
@@ -69,12 +113,14 @@ def check_contract_conditions(info_dict, dict_index):
                     holding_contracts_cols.add(column)
     return list(holding_contracts_cols)
 
+
 def holding_info(info_dict):
     for dict_index in range(len(info_dict.maps)):
         checked_columns = check_contract_conditions(info_dict, dict_index)
         info_dict.maps[dict_index]['checked_columns'] = checked_columns
 
-def cal_today_result(df1, df2, df3, df4,df5,checked_cols,lastdel_multi):
+
+def cal_today_result(df1, df2, df3, df4, df5, checked_cols, lastdel_multi):
     df1 = list(df1.values())[0]
     df2 = list(df2.values())[0]
     df3 = list(df3.values())[0]
@@ -90,11 +136,12 @@ def cal_today_result(df1, df2, df3, df4,df5,checked_cols,lastdel_multi):
         today_open_cost = abs(df4[col].iloc[-1])  # 累计开仓成本
         prev_open_cost = abs(df4[col].iloc[-2] if df4[col].shape[0] > 1 else today_open_cost)  # 前一日累计开仓成本，如有
         if prev_open_cost != 0:
-            today_total_return_change = (1+df3[col].iloc[-1] / today_open_cost) / (1+df3[col].iloc[-2] / prev_open_cost)-1
+            today_total_return_change = (1 + df3[col].iloc[-1] / today_open_cost) / (
+                    1 + df3[col].iloc[-2] / prev_open_cost) - 1
         else:
             today_total_return_change = float('nan')  # 如果前一日累计开仓成本为零
         # 持仓合约数
-        num_contracts = df5[col].iloc[-1]/cm
+        num_contracts = df5[col].iloc[-1] / cm
         # 持仓名义市值
         nominal_value = abs(df1[col].iloc[-1])
         # 平仓价值
@@ -120,9 +167,10 @@ def cal_today_result(df1, df2, df3, df4,df5,checked_cols,lastdel_multi):
         mask = (indicators_today['持仓名义市值'] != 0) | (indicators_today['平仓价值'] != 0)
     return indicators_today[mask]
 
-def holding_contract_info(info_dict,lastdel_multi):
+
+def holding_contract_info(info_dict, lastdel_multi):
     holding_info(info_dict)
-    holding_summary_info={}
+    holding_summary_info = {}
     for dict_index, data_dict in enumerate(info_dict.maps):
         holding_contracts_cols = data_dict.get('checked_columns', [])
 
@@ -130,12 +178,13 @@ def holding_contract_info(info_dict,lastdel_multi):
         df2 = {key: value for key, value in data_dict.items() if '累计平仓价值' in key}  # 包含累计平仓价值
         df3 = {key: value for key, value in data_dict.items() if '累计净损益' in key}  # 包含累计净损益
         df4 = {key: value for key, value in data_dict.items() if '累计开仓成本' in key}  # 包含累计开仓成本
-        df5 = {key: value for key, value in data_dict.items() if '剩余份数' in key}   # 剩余合约数
+        df5 = {key: value for key, value in data_dict.items() if '剩余份数' in key}  # 剩余合约数
 
         indicators_df = cal_today_result(df1, df2, df3, df4, df5, holding_contracts_cols, lastdel_multi)
         holding_summary_info[dict_index] = indicators_df
 
     return holding_summary_info
+
 
 ##输出
 def summary_output_file_path(output_path='./'):
@@ -147,20 +196,19 @@ def summary_output_file_path(output_path='./'):
 
     return _path
 
+
 def output_summary(person_holder, info_dict, lastdel_multi, base_store_path=None, return_data=False):
     store_path = summary_output_file_path(output_path=base_store_path)
+
     person_contract_summary = process_ph(person_holder)
-    holding_contracts_summary = holding_contract_info(info_dict,lastdel_multi)
+    holding_contracts_summary = holding_contract_info(info_dict, lastdel_multi)
 
     with pd.ExcelWriter(store_path) as f:
-        person_contract_summary.to_excel(f,sheet_name='整体统计输出')
-        holding_contracts_summary[0].to_excel(f,sheet_name='衍生品多头截面持仓合约统计')
-        holding_contracts_summary[1].to_excel(f,sheet_name='衍生品空头截面持仓合约统计')
+        person_contract_summary.to_excel(f, sheet_name='整体统计输出')
+        holding_contracts_summary[0].to_excel(f, sheet_name='衍生品多头截面持仓合约统计')
+        holding_contracts_summary[1].to_excel(f, sheet_name='衍生品空头截面持仓合约统计')
     if return_data:
-        return person_contract_summary,holding_contracts_summary
-
-
-
+        return person_contract_summary, holding_contracts_summary
 
 
 if __name__ == '__main__':
@@ -198,13 +246,11 @@ if __name__ == '__main__':
                                                     )
 
     person_holder, person_ls_summary_dict, merged_summary_dict, contract_summary_dict, info_dict = PR.group_by_summary(
-        info_dict, return_data=True)
+        info_dict, return_data=True, store_2_excel=False)
 
     # PR.summary_person_info(person_summary_dict, merged_summary_dict, info_dict, lastdel_multi, quote, )
 
-    person_summary, holding_summary = output_summary(person_holder, info_dict,lastdel_multi, return_data=True)
-
-
+    person_summary, holding_summary = output_summary(person_holder, info_dict, lastdel_multi, return_data=True)
 
     print(1)
     pass

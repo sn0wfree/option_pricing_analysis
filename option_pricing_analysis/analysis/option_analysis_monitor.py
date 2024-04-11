@@ -1242,24 +1242,9 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             merged_summary_dict[commodity + '多空输出'] = summary_ls_merged
         return contract_summary_dict, merged_summary_dict
 
-        pass
-
-    def group_by_summary(self, info_dict, base_store_path=None, return_data=False):
-        store_path = self.create_daily_summary_file_path(output_path=base_store_path)
-
-        contracts = self.reduced_contracts()
-
-        commodity_contract_df = pd.DataFrame(list(self.contract_link_commodity(contracts, )),
-                                             columns=['contract', 'symbol', 'commodity'])
-
-        contract_summary_dict, merged_summary_dict = self.groupby_contract_summary(info_dict, commodity_contract_df)
-
-        person_holder_dict, person_ls_summary_dict = self.groupby_person_summary(info_dict, merged_summary_dict)
-
-        # 分人
-
-        ## 分人分项目分年度计算盈亏
-
+    @staticmethod
+    def store_2_excel(store_path, person_holder_dict, person_ls_summary_dict, merged_summary_dict,
+                      contract_summary_dict, info_dict):
         with pd.ExcelWriter(store_path) as f:
 
             # 分人
@@ -1269,12 +1254,14 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
                 data.to_excel(f, name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
+
             ## 分人分项目分年度计算盈亏
             for name, data in sorted(person_ls_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
                 data.to_excel(f, name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
+
             ## 分合约计算盈亏
             for name, data in sorted(merged_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
@@ -1301,6 +1288,70 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计行权收益')
             info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计净损益')
             info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
+        pass
+
+    def group_by_summary(self, info_dict, base_store_path=None, return_data=False, store_2_excel=True):
+        store_path = self.create_daily_summary_file_path(output_path=base_store_path)
+
+        contracts = self.reduced_contracts()
+
+        commodity_contract_df = pd.DataFrame(list(self.contract_link_commodity(contracts, )),
+                                             columns=['contract', 'symbol', 'commodity'])
+
+        contract_summary_dict, merged_summary_dict = self.groupby_contract_summary(info_dict, commodity_contract_df)
+
+        person_holder_dict, person_ls_summary_dict = self.groupby_person_summary(info_dict, merged_summary_dict)
+
+        # 分人
+
+        ## 分人分项目分年度计算盈亏
+        if store_2_excel:
+            self.store_2_excel(store_path, person_holder_dict, person_ls_summary_dict, merged_summary_dict,
+                               contract_summary_dict, info_dict)
+
+            # with pd.ExcelWriter(store_path) as f:
+            #
+            #     # 分人
+            #
+            #     for name, data in sorted(person_holder_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+            #         data.index = data.index.strftime('%Y-%m-%d')
+            #         data.to_excel(f, name)
+            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+            #         print(f"{name} output!")
+            #
+            #     ## 分人分项目分年度计算盈亏
+            #     for name, data in sorted(person_ls_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+            #         data.index = data.index.strftime('%Y-%m-%d')
+            #         data.to_excel(f, name)
+            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+            #         print(f"{name} output!")
+            #
+            #     ## 分合约计算盈亏
+            #     for name, data in sorted(merged_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+            #         data.index = data.index.strftime('%Y-%m-%d')
+            #         data.to_excel(f, name)
+            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+            #         print(f"{name} output!")
+            #
+            #     for name, data in sorted(contract_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+            #         data.index = data.index.strftime('%Y-%m-%d')
+            #         data.to_excel(f, name)
+            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+            #         print(f"{name} output!")
+            #
+            #     info_dict['衍生品多头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头持仓价值截面')
+            #     info_dict['衍生品多头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品多头累计开仓成本')
+            #     info_dict['衍生品多头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头累计平仓价值')
+            #     info_dict['衍生品多头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计行权收益')
+            #     info_dict['衍生品多头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计净损益')
+            #     info_dict['衍生品多头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品多头剩余合约数')
+            #
+            #     info_dict['衍生品空头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头持仓价值截面')
+            #     info_dict['衍生品空头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品空头累计开仓成本')
+            #     info_dict['衍生品空头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头累计平仓价值')
+            #     info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计行权收益')
+            #     info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计净损益')
+            #     info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
 
         if return_data:
             return person_holder_dict, person_ls_summary_dict, merged_summary_dict, contract_summary_dict, info_dict
