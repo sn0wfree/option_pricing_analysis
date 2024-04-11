@@ -98,9 +98,9 @@ def check_contract_conditions(info_dict, dict_index):
     return list(holding_contracts_cols)
 
 
-def check_contract_conditions_v2(info_dict, dict_index):
+def check_contract_conditions_v2(sub_dict):
     holding_contracts_cols = set()
-    for df_name, df in info_dict.maps[dict_index].items():
+    for df_name, df in sub_dict.items():
         # df_diff = df.diff(1)
         for column in df.columns:
             if df[column].isnull().all():
@@ -119,8 +119,8 @@ def check_contract_conditions_v2(info_dict, dict_index):
 
 
 def holding_info(info_dict):
-    for dict_index in range(len(info_dict.maps)):
-        checked_columns = check_contract_conditions_v2(info_dict, dict_index)
+    for sub_dict in info_dict.maps:
+        checked_columns = check_contract_conditions_v2(sub_dict)
         info_dict.maps[dict_index]['checked_columns'] = checked_columns
 
 
@@ -216,12 +216,18 @@ def output_summary(person_holder, info_dict, lastdel_multi, base_store_path=None
 
 
 if __name__ == '__main__':
+    import yaml
+
+    path = os.path.join(os.path.split(__file__)[0], 'config.yml')
+
+    with open(path, 'r', encoding="utf-8") as f:
+        config = yaml.load(f.read(), Loader=yaml.FullLoader)
     today_str = pd.to_datetime(datetime.datetime.today()).strftime('%Y%m%d')
 
     wh = WindHelper()
 
     PR = ReportAnalyst(
-        report_file_path='C:\\Users\\linlu\\Documents\\GitHub\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
+        report_file_path=config['report_file_path'],
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'HO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'IO\d{4}-[CP]-[0-9]+.CFE': 'll',
