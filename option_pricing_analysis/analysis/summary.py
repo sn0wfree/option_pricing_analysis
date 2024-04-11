@@ -6,6 +6,13 @@ import pandas as pd
 from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst
 
 
+def chunk(obj, chunks=2000):
+    if hasattr(obj, '__len__'):
+        length = len(obj)
+        for i in range(0, length, chunks):
+            yield obj[i:i + chunks]
+
+
 def cal_periods_result(df, col):
     periods_results = {}
     # 根据列名分别计算
@@ -45,14 +52,14 @@ def process_ph(person_holder):
     target_col = ['累计收益', '累计收益率', '当日收益', '当日收益率',
                   '近一周收益', '近一周收益率', '近一月收益', '近一月收益率']
 
-    base_cols = ['累计净损益(右轴)', '累计净值']
+    base_cols = ['累计净值', '累计净损益(右轴)', ]
 
     for prsn, df in person_holder.items():
 
-        filtered_col = base_cols + df.columns.tolist()[8:]
+        filtered_col = base_cols + sorted(df.columns.tolist()[8:])
         # filtered_col = [item for item in df.columns if "损益" in item or "净值" in item]
         person_dict = {}  # pd.DataFrame(columns=target_col)
-        for pnl_col, nv_col in zip(filtered_col[:-1], filtered_col[1:]):
+        for nv_col, pnl_col in chunk(filtered_col, 2):
             metrics_info = cal_periods_result_v2(df, pnl_col, nv_col)
             name = nv_col[:2]
             person_dict[(prsn, name)] = metrics_info
