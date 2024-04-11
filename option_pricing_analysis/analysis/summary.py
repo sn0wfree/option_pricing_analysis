@@ -67,7 +67,7 @@ def process_ph(person_holder):
             #     if metric in person_df.columns:
             # person_df.at[(pnl_col, nv_col), metric] = metrics_info[metric]
         all_person_dfs.append(pd.DataFrame(person_dict).T[target_col])
-    full_summary_df = pd.concat(all_person_dfs, axis=0, keys=person_holder.keys())
+    full_summary_df = pd.concat(all_person_dfs, axis=0)
 
     # for key in person_holder.keys():
     #     if '累计' in full_summary_df.index:
