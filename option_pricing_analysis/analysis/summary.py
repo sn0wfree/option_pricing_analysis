@@ -42,18 +42,16 @@ def cal_periods_result_v2(df, pnl_col, nv_col):
 
 def process_ph(person_holder):
     all_person_dfs = []
-    # target_col = ['累计收益', '累计收益率', '当日收益', '当日收益率',
-    #               '近一周收益', '近一周收益率', '近一月收益', '近一月收益率']
+    target_col = ['累计收益', '累计收益率', '当日收益', '当日收益率',
+                  '近一周收益', '近一周收益率', '近一月收益', '近一月收益率']
 
     base_cols = ['累计净损益(右轴)', '累计净值']
 
     for prsn, df in person_holder.items():
 
         filtered_col = base_cols + df.columns.tolist()[8:]
-
         # filtered_col = [item for item in df.columns if "损益" in item or "净值" in item]
         person_dict = {}  # pd.DataFrame(columns=target_col)
-
         for pnl_col, nv_col in zip(filtered_col[:-1], filtered_col[1:]):
             metrics_info = cal_periods_result_v2(df, pnl_col, nv_col)
             name = nv_col[:2]
@@ -61,8 +59,7 @@ def process_ph(person_holder):
             # for metric in metrics_info:
             #     if metric in person_df.columns:
             # person_df.at[(pnl_col, nv_col), metric] = metrics_info[metric]
-
-        all_person_dfs.append(pd.DataFrame(person_dict).T)
+        all_person_dfs.append(pd.DataFrame(person_dict).T[target_col])
     full_summary_df = pd.concat(all_person_dfs, axis=0, keys=person_holder.keys())
 
     # for key in person_holder.keys():
@@ -116,7 +113,7 @@ def check_contract_conditions_v2(info_dict, dict_index):
 
 def holding_info(info_dict):
     for dict_index in range(len(info_dict.maps)):
-        checked_columns = check_contract_conditions(info_dict, dict_index)
+        checked_columns = check_contract_conditions_v2(info_dict, dict_index)
         info_dict.maps[dict_index]['checked_columns'] = checked_columns
 
 
