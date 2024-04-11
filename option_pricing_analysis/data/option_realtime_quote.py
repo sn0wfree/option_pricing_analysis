@@ -1,6 +1,4 @@
 # coding = utf-8
-
-
 from gevent import monkey
 
 monkey.patch_all()
@@ -209,6 +207,7 @@ def download_hq_quote(working_period=(('09:30:00', '11:30,00'),
 
     prefix, file_name, p = create_file_name(store_path, today=today)
 
+
     tmp_cunt = 1
 
     with sqlite3.connect(p) as sqlite_conn:
@@ -229,7 +228,6 @@ def download_hq_quote(working_period=(('09:30:00', '11:30,00'),
             elif now > '15:00:00':
                 print(f'当前时间为{now},已经收盘,程序终止!')
                 break
-
             elif now < '09:00:00':
                 s = (pd.to_datetime('09:00:00') - pd.to_datetime(datetime.datetime.now().strftime("%H:%m:%S"))).seconds
 

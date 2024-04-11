@@ -1,33 +1,34 @@
 # coding=utf-8
+import akshare as ak
+from ClickSQL import BaseSingleFactorTableNode
+
 from option_pricing_analysis.Model.BSM import ImpliedVolatility, OptionPricing
 
 
-def map_cal_option_iv(df):
-    ivfunc = ImpliedVolatility(pricing_model=OptionPricing())
-
-    func = ivfunc.implied_volatility_brent
-
-    for stock_price, strike_price, risk_free, t, cp_fee, cp_sign, g in df.values:
-        # iv
-        yield func(stock_price, strike_price, risk_free, t, cp_fee, cp_sign, g)
+def idx_quote(symbol='sh000852'):
+    stock_zh_index_daily_df = ak.stock_zh_index_daily(symbol=symbol)
+    return stock_zh_index_daily_df
 
 
-# def summary_data(df):
-#     iv_series = map_cal_option_iv(df)
-#     df['iv'] = iv_series
-#     return df
+def map_cal_option_iv(option_quote):
+    iv_func = ImpliedVolatility(pricing_f=OptionPricing, method='MCPricing').implied_volatility_brent
+    iv = [iv_func(s, x, r, t, cp_fee, cp_sign, g) for s, x, r, t, cp_fee, cp_sign, g in option_quote.values]
+    return iv
+
+
+def get_option_daily_quote(conn, dt='2024-04-09'):
+    sql = f"select contract_code,trade_date,open,high,low,close,delta from quote.derivative_quote where startsWith(contract_code,'MO') and trade_date ='{dt}' "
+    df = conn(sql)
+    return df
 
 
 if __name__ == '__main__':
-    import pandas as pd
+    conn = BaseSingleFactorTableNode("clickhouse://default:Imsn0wfree@47.104.186.157:8123/system")
 
-    df = pd.read_excel('C:\\Users\\user\\Documents\\GitHub\\option_pricing_analysis\\option_pricing_analysis\\济川转债可转债债券历史行情(1).xlsx')
-    cols = ['正股价格', '转股价', '到期时间', '权证价格']
+    # idx_quote = idx_quote(symbol='sh000852')
+    # op_quote = get_option_daily_quote(conn, dt='2024-04-09')
 
-    df['risk_free'] = 0.02
-    df['g'] = 0
-    df['cp_sign'] = 1
-    named_cols = ['正股价格', '转股价', 'risk_free', '到期时间', '权证价格', 'cp_sign', 'g']
-    df['iv'] = list(map_cal_option_iv(df[named_cols]))
-    df.to_csv('result.csv')
+    # option_sse_minute_sina_df = ak.option_sse_minute_sina(symbol="mo2405")
+    print(1)
+
     pass
