@@ -6,6 +6,8 @@ from collections import Callable, ChainMap
 from glob import glob
 
 import pandas as pd
+import yaml
+from CodersWheel.QuickTool.detect_file_path import detect_file_full_path
 from CodersWheel.QuickTool.file_cache import file_cache
 
 
@@ -627,8 +629,9 @@ class ProcessReportLoadingTools(Tools):
 
         suffix = tuple(set(rule.values()))
 
-        filtered_contracts = (x for x in contracts if not x.endswith(suffix))
-        h = {contract: cls._completed_contract_full_name(contract, rule) for contract in filtered_contracts}
+        # filtered_contracts = (x for x in contracts ) # 有后缀了就不替换了
+        h = {contract: cls._completed_contract_full_name(contract, rule) if not contract.endswith(suffix) else contract
+             for contract in contracts}
 
         return h
 
@@ -860,7 +863,7 @@ class ProcessReport(ProcessReportSingle):
                                          'AG\d{4}.SHF': 'gr',
                                          'AU\d{4}.SHF': 'wj',
                                          'CU\d{4}.SHF': 'wj',
-                                         'AL\d{4}.SHF': 'gr'}):
+                                         'AL\d{4}.SHF': 'gr'}, **kwargs):
         rule = dict([k.split('.') for k in contract_2_person_rule.keys()])
 
         _parsed_report = self.load_report(report_file_path,
@@ -948,7 +951,7 @@ class ProcessReport(ProcessReportSingle):
         return info_dict
 
     def parse_transactions_with_quote_v2(self, quote, lastdel_multi,
-                                         trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, },
+                                         trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, "买平今": -1, },
                                          ):
         transactions = self.create_transactions(lastdel_multi, reduced=True, return_df=True,
                                                 trade_type_mark=trade_type_mark)
@@ -992,6 +995,7 @@ class SummaryFunctions(object):
             symbol + '残值'] + summary_info['行权收益']
         summary_info['累计持仓收益率'] = (summary_info['累计净损益(右轴)'] / summary_info['累计开仓成本'].abs()).fillna(
             0)
+        summary_info['累计净值'] = summary_info['累计持仓收益率'] + 1
 
         summary_info = ProcessReport.conct_and_rd_all_zero_rows_and_parse_more(summary_info)
 
@@ -1126,11 +1130,24 @@ class SummaryFunctions(object):
         for contract in contracts:
             con_type = Tools.code_type_detect(contract)
             commodity_type = Tools.code_commodity_detect(contract)
+
+            # result = filter(None,map(lambda x: re.compile(x).match(contract),contract_2_person_rule.keys() ))
+            alternative = []
             for pattern, person in contract_2_person_rule.items():
 
                 if re.compile(pattern).match(contract):
-                    yield contract, person, con_type, commodity_type
-                    break
+                    code_pattern = contract == pattern
+                    alternative.append((code_pattern, person))
+
+            if len(alternative) == 1:
+                person = alternative[0][-1]
+                yield contract, person, con_type, commodity_type
+            elif len(alternative) > 1:
+                for code_pattern, person in alternative:
+                    if code_pattern:
+                        yield contract, person, con_type, commodity_type
+                else:
+                    raise ValueError(f'got multi-regex({len(alternative)}) rules on {contract}:{alternative}')
             else:
                 yield contract, None, con_type, commodity_type
 
@@ -1148,7 +1165,7 @@ class SummaryFunctions(object):
         return _path
 
     @staticmethod
-    def long_short_merge(commodity, long, short, info_dict):
+    def long_short_merge(commodity, long, short):
 
         common_cols = ['累计平仓价值', '累计开仓成本', f'{commodity}残值',
                        '行权收益', '累计净损益(右轴)', f'{commodity}累计价值（残值+行权收益+平仓收益）',
@@ -1173,53 +1190,64 @@ class SummaryFunctions(object):
 
         summary_ls_merged = pd.concat(h, axis=1).sort_index().fillna(0)
 
-        if commodity == 'MO':
-            print(1)
         summary_ls_merged = ProcessReport.conct_and_rd_all_zero_rows_and_parse_more(summary_ls_merged)
 
+        summary_ls_merged['累计持仓收益率'] = (
+                summary_ls_merged['累计净损益(右轴)'] / summary_ls_merged['累计开仓成本']).fillna(0, limit=1)
+        summary_ls_merged['累计净值'] = summary_ls_merged['累计持仓收益率'] + 1
         return summary_ls_merged
-
-        pass
 
 
 class ReportAnalyst(ProcessReport, SummaryFunctions):
-    def groupby_person_summary(self, info_dict, merged_summary_dict):
-        contracts = self.reduced_contracts()
-        person_link_df = pd.DataFrame(
-            list(self.contract_link_person(contracts, contract_2_person_rule=self.contract_2_person_rule)),
-            columns=['contract', 'person', 'symbol', 'commodity'])
 
-        person_ls_summary_dict = {}
+    def grouper(self, df_dict, link_df, groupby='person'):
+        all_ls_output = all(map(lambda x: '多空输出' in x, df_dict.keys()))
+
+        pass
+
+    def groupby_person_summary(self, info_dict, person_link_df, groupby='person'):
+        if groupby not in person_link_df.columns:
+            raise ValueError(f'group by value({groupby}) on in link_df!')
+
+        # person_ls_summary_dict = {}
         person_holder = {}
-        for person, dfdd in person_link_df.groupby('person'):
+        for person, dfdd in person_link_df.groupby(groupby):
             commodity_contracts = dfdd['contract'].unique().tolist()
             x_long_summary_info, x_short_summary_info = self.create_summary_info(commodity_contracts,
                                                                                  info_dict,
                                                                                  symbol=person)
-            summary_ls_merged = self.long_short_merge(person, x_long_summary_info, x_short_summary_info, info_dict)
-            person_ls_summary_dict[person + '多空输出'] = summary_ls_merged
+            summary_ls_merged = self.long_short_merge(person, x_long_summary_info, x_short_summary_info)
+            # person_ls_summary_dict[person + '多空输出'] = summary_ls_merged
 
             res = summary_ls_merged.copy(deep=True)
 
             res['累计持仓收益率'] = (res['累计净损益(右轴)'] / res['累计开仓成本'].abs()).fillna(0)
             res['累计净值'] = res['累计持仓收益率'] + 1
 
-            for commodity in dfdd['commodity'].unique():
-                comm_res = merged_summary_dict[commodity + '多空输出']
+            for commodity, ddff in dfdd.groupby('commodity'):
+                commodity_contracts2 = ddff['contract'].unique().tolist()
 
-                comm_res[f'{commodity[:2]}持仓收益率'] = (
-                        comm_res['累计净损益(右轴)'] / comm_res['累计开仓成本'].abs()).fillna(0)
-                res[f'{commodity[:2]}净值'] = comm_res[f'{commodity[:2]}持仓收益率'].fillna(0) + 1
-                res[f'{commodity[:2]}净值'] = res[f'{commodity[:2]}净值'].fillna(1)
-                res[f'{commodity[:2]}损益'] = comm_res['累计净损益(右轴)']
-                res[f'{commodity[:2]}损益'] = res[f'{commodity[:2]}损益'].fillna(0)
+                sub_x_long_summary_info, sub_x_short_summary_info = self.create_summary_info(commodity_contracts2,
+                                                                                             info_dict,
+                                                                                             symbol=person)
+                required_cols = ['累计净损益(右轴)', '累计开仓成本']
+                reduced_comm_res = self.long_short_merge(person, sub_x_long_summary_info, sub_x_short_summary_info)[
+                    required_cols]
+
+                temp = (reduced_comm_res['累计净损益(右轴)'] / reduced_comm_res['累计开仓成本'].abs()).fillna(0)
+                res[f'{commodity[:2]}净值'] = temp.copy(deep=True).fillna(0) + 1
+                # res[f'{commodity[:2]}净值'] = res[f'{commodity[:2]}净值'].fillna(1)
+                res[f'{commodity[:2]}损益'] = reduced_comm_res['累计净损益(右轴)'].copy(deep=True).fillna(0)
+                # res[f'{commodity[:2]}损益'] = res[f'{commodity[:2]}损益']
             person_holder[person] = res
-        return person_holder, person_ls_summary_dict
+        return person_holder  # , person_ls_summary_dict
 
-    def groupby_contract_summary(self, info_dict, commodity_contract_df):
+    def groupby_commodity_summary(self, info_dict, commodity_contract_df, groupby='commodity'):
+        if groupby not in commodity_contract_df.columns:
+            raise ValueError(f'group by value({groupby}) on in link_df!')
         contract_summary_dict = {}
         merged_summary_dict = {}
-        for commodity, dfdd in commodity_contract_df.groupby('commodity'):
+        for commodity, dfdd in commodity_contract_df.groupby(groupby):
             commodity_contracts = dfdd['contract'].unique().tolist()
             x_long_summary_info, x_short_summary_info = self.create_summary_info(commodity_contracts,
                                                                                  info_dict,
@@ -1238,13 +1266,12 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             else:
                 x_short_summary_info = None
 
-            summary_ls_merged = self.long_short_merge(commodity, x_long_summary_info, x_short_summary_info, info_dict)
+            summary_ls_merged = self.long_short_merge(commodity, x_long_summary_info, x_short_summary_info)
             merged_summary_dict[commodity + '多空输出'] = summary_ls_merged
         return contract_summary_dict, merged_summary_dict
 
     @staticmethod
-    def store_2_excel(store_path, person_holder_dict, person_ls_summary_dict, merged_summary_dict,
-                      contract_summary_dict, info_dict):
+    def store_2_excel(store_path, person_holder_dict, merged_summary_dict, contract_summary_dict, info_dict, contracts):
         with pd.ExcelWriter(store_path) as f:
 
             # 分人
@@ -1256,11 +1283,11 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
                 print(f"{name} output!")
 
             ## 分人分项目分年度计算盈亏
-            for name, data in sorted(person_ls_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
-                data.index = data.index.strftime('%Y-%m-%d')
-                data.to_excel(f, name)
-                Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
-                print(f"{name} output!")
+            # for name, data in sorted(person_ls_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+            #     data.index = data.index.strftime('%Y-%m-%d')
+            #     data.to_excel(f, name)
+            #     Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+            #     print(f"{name} output!")
 
             ## 分合约计算盈亏
             for name, data in sorted(merged_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
@@ -1288,73 +1315,32 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计行权收益')
             info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计净损益')
             info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
-        pass
 
     def group_by_summary(self, info_dict, base_store_path=None, return_data=False, store_2_excel=True):
-        store_path = self.create_daily_summary_file_path(output_path=base_store_path)
 
         contracts = self.reduced_contracts()
+        person_link_df = pd.DataFrame(
+            list(self.contract_link_person(contracts, contract_2_person_rule=self.contract_2_person_rule)),
+            columns=['contract', 'person', 'symbol', 'commodity'])
 
-        commodity_contract_df = pd.DataFrame(list(self.contract_link_commodity(contracts, )),
-                                             columns=['contract', 'symbol', 'commodity'])
+        commodity_contract_df = person_link_df[['contract', 'symbol', 'commodity']].drop_duplicates()
 
-        contract_summary_dict, merged_summary_dict = self.groupby_contract_summary(info_dict, commodity_contract_df)
+        contract_summary_dict, merged_summary_dict = self.groupby_commodity_summary(info_dict, commodity_contract_df,
+                                                                                    groupby='commodity')
 
-        person_holder_dict, person_ls_summary_dict = self.groupby_person_summary(info_dict, merged_summary_dict)
+        person_holder_dict = self.groupby_person_summary(info_dict,
+                                                         person_link_df, groupby='person')
 
         # 分人
 
         ## 分人分项目分年度计算盈亏
         if store_2_excel:
-            self.store_2_excel(store_path, person_holder_dict, person_ls_summary_dict, merged_summary_dict,
-                               contract_summary_dict, info_dict)
-
-            # with pd.ExcelWriter(store_path) as f:
-            #
-            #     # 分人
-            #
-            #     for name, data in sorted(person_holder_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
-            #         data.index = data.index.strftime('%Y-%m-%d')
-            #         data.to_excel(f, name)
-            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
-            #         print(f"{name} output!")
-            #
-            #     ## 分人分项目分年度计算盈亏
-            #     for name, data in sorted(person_ls_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
-            #         data.index = data.index.strftime('%Y-%m-%d')
-            #         data.to_excel(f, name)
-            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
-            #         print(f"{name} output!")
-            #
-            #     ## 分合约计算盈亏
-            #     for name, data in sorted(merged_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
-            #         data.index = data.index.strftime('%Y-%m-%d')
-            #         data.to_excel(f, name)
-            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
-            #         print(f"{name} output!")
-            #
-            #     for name, data in sorted(contract_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
-            #         data.index = data.index.strftime('%Y-%m-%d')
-            #         data.to_excel(f, name)
-            #         Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
-            #         print(f"{name} output!")
-            #
-            #     info_dict['衍生品多头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头持仓价值截面')
-            #     info_dict['衍生品多头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品多头累计开仓成本')
-            #     info_dict['衍生品多头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头累计平仓价值')
-            #     info_dict['衍生品多头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计行权收益')
-            #     info_dict['衍生品多头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计净损益')
-            #     info_dict['衍生品多头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品多头剩余合约数')
-            #
-            #     info_dict['衍生品空头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头持仓价值截面')
-            #     info_dict['衍生品空头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品空头累计开仓成本')
-            #     info_dict['衍生品空头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头累计平仓价值')
-            #     info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计行权收益')
-            #     info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计净损益')
-            #     info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
+            store_path = self.create_daily_summary_file_path(output_path=base_store_path)
+            self.store_2_excel(store_path, person_holder_dict, merged_summary_dict, contract_summary_dict, info_dict,
+                               contracts)
 
         if return_data:
-            return person_holder_dict, person_ls_summary_dict, merged_summary_dict, contract_summary_dict, info_dict
+            return person_holder_dict, merged_summary_dict, contract_summary_dict
 
     def summary_person_info(self, person_summary_dict: dict, merged_summary_dict: dict, ):
         person_holder = {}
@@ -1392,7 +1378,15 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
         ## 需要一个期权对冲，期货对冲
         ## 分个人收益统计,分品种净值化和损益,留下2天的持仓状态
 
-    pass
+
+class Configs(object):
+    def __init__(self):
+        full_path = detect_file_full_path(conf_file='config.yml')
+        with open(full_path, 'r', encoding="utf-8") as f:
+            self.config = yaml.load(f.read(), Loader=yaml.FullLoader)
+
+    def __getitem__(self, item):
+        return self.config[item]
 
 
 if __name__ == '__main__':
@@ -1405,14 +1399,20 @@ if __name__ == '__main__':
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'HO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'IO\d{4}-[CP]-[0-9]+.CFE': 'll',
+                                'IM\d{4}.CFE': 'll',
+
                                 'IH\d{4}.CFE': 'wj',
                                 'IF\d{4}.CFE': 'wj',
-                                'IM\d{4}.CFE': 'll',
-                                'AG\d{4}.SHF': 'gr',
                                 'AU\d{4}.SHF': 'wj',
                                 'CU\d{4}.SHF': 'wj',
                                 'CU\d{4}[CP]\d{5}.SHF': 'wj',
-                                'AL\d{4}.SHF': 'gr'}
+                                'AL2406.SHF': 'wj',
+
+                                'AG\d{4}.SHF': 'gr',
+                                'AL2303.SHF': 'gr',
+                                'SN2406.SHF': 'gr',
+
+                                }
 
     )
 
@@ -1429,7 +1429,7 @@ if __name__ == '__main__':
 
                                                     )
 
-    person_holder, person_ls_summary_dict, merged_summary_dict, contract_summary_dict, info_dict = PR.group_by_summary(
+    person_holder,  merged_summary_dict, contract_summary_dict = PR.group_by_summary(
         info_dict, return_data=True)
 
     # PR.summary_person_info(person_summary_dict, merged_summary_dict, info_dict, lastdel_multi, quote, )
