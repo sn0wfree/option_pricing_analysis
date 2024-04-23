@@ -1,10 +1,13 @@
 # coding=utf-8
+import copy
 import datetime
 import os
 import re
-from collections import Callable, ChainMap
+from collections import Callable, ChainMap, deque
+from collections.abc import Iterable
 from glob import glob
 
+import numpy as np
 import pandas as pd
 import yaml
 from CodersWheel.QuickTool.detect_file_path import detect_file_full_path
@@ -130,6 +133,196 @@ class WindHelper(object):
         return last_deliv_and_multi
 
 
+class DequeMatcher(deque):
+    def __init__(self, *args, k=None,
+                 contract_col='contract_code',
+                 share_col='手数',
+                 price_col='成交均价',
+                 trade_type='trade_type',
+                 dt_col='日期', **kwargs):
+        super(DequeMatcher, self).__init__(*args, **kwargs)
+        if k is not None:
+            if isinstance(k, Iterable):
+                self.extend(list(k))
+            else:
+                pass
+        self.__share_col__ = share_col
+        self.__price_col__ = price_col
+        self.__contract_col__ = contract_col
+        self.__dt_col__ = dt_col
+        self.__trade_type__ = trade_type
+
+    # @property
+    def get_total_shares(self):
+        total = 0
+        for s in self:
+            total += s[self.__share_col__]
+        return total
+
+    # @property
+    def get_avg_price(self):
+        total_share = self.get_total_shares()
+        if total_share == 0:
+            return None
+        amt = np.sum([s[self.__price_col__] * s[self.__share_col__] for s in self])
+
+        return amt / total_share
+
+    @classmethod
+    def multi_contract_recus_match_v2(cls, transcations_multi,
+
+                                      contract_col='contract_code',
+                                      share_col='手数',
+                                      price_col='成交均价',
+                                      trade_type='trade_type',
+                                      dt_col='报单日期', method='FIFO'
+                                      ):
+
+        for contract, sub_transca in transcations_multi.sort_values(dt_col).groupby(contract_col):
+            if contract == 'MO2405-C-5200.CFE':
+                print(1)
+            # long
+            long_mask = sub_transca['买卖开平'].isin(['买开', '卖平'])
+            res = cls.single_contract_recurs_match_v2(sub_transca[long_mask], contract_col=contract_col,
+                                                      share_col=share_col,
+                                                      price_col=price_col,
+                                                      trade_type=trade_type,
+                                                      dt_col=dt_col, method=method)
+
+            yield contract, '多头', res
+
+            # long
+            short_mask = sub_transca['买卖开平'].isin(['卖开', '买平'])
+            res = cls.single_contract_recurs_match_v2(sub_transca[short_mask], contract_col=contract_col,
+                                                      share_col=share_col,
+                                                      price_col=price_col,
+                                                      trade_type=trade_type,
+                                                      dt_col=dt_col, method=method)
+
+            yield contract, '空头', res
+
+    @classmethod
+    def single_contract_recurs_match_v2(cls, transcation_1contract,
+                                        contract_col='contract_code',
+                                        share_col='手数',
+                                        price_col='成交均价',
+                                        trade_type='trade_type',
+                                        dt_col='日期', method='FIFO'
+
+                                        ):
+
+        buy_records = transcation_1contract[transcation_1contract[trade_type] == 1]
+        buy_deque = DequeMatcher(k=buy_records.to_dict('records'),
+                                 contract_col=contract_col,
+                                 share_col=share_col,
+                                 price_col=price_col,
+                                 trade_type=trade_type,
+                                 dt_col=dt_col, )
+
+        sell_records = transcation_1contract[transcation_1contract[trade_type] == -1]
+        sell_deque = DequeMatcher(k=sell_records.to_dict('records'), contract_col=contract_col,
+                                  share_col=share_col,
+                                  price_col=price_col,
+                                  trade_type=trade_type,
+                                  dt_col=dt_col, )
+        h = []
+        res = cls.recur_match_core(buy_deque, sell_deque, h,
+                                   contract_col=contract_col,
+                                   share_col=share_col,
+                                   price_col=price_col,
+                                   trade_type=trade_type,
+                                   dt_col=dt_col, method=method)
+        return res
+
+    @staticmethod
+    def recur_match_core(buy_deque, sell_deque, h,
+                         contract_col='contract_code',
+                         share_col='手数',
+                         price_col='成交均价',
+                         trade_type='trade_type',
+                         dt_col='日期', method='FIFO'):
+
+        if method == 'FIFO':
+            popfunc = lambda x: x.popleft()
+            appendfunc = lambda deque, x: deque.appendleft(x)
+        elif method == 'LIFO':
+            popfunc = lambda x: x.pop()
+            appendfunc = lambda deque, x: deque.append(x)
+        else:
+            raise ValueError('unknown method!')
+        if len(sell_deque) == 0:  # 这是最后退出的节点
+            return buy_deque.get_avg_price(), h
+        else:
+            buy_length = len(buy_deque)
+            if buy_length == 0:
+                raise ValueError('No apply data left!')
+
+            buy_total_share = buy_deque.get_total_shares()
+            sell_total_share = sell_deque.get_total_shares()
+
+            if buy_total_share < sell_total_share:
+                raise ValueError('buy side less than sell side!')
+
+            elif np.round(buy_total_share) >= np.round(sell_total_share, 2):  # buy share 大于sell share
+
+                buy1 = popfunc(buy_deque)  # 取一个
+                sell1 = popfunc(sell_deque)  # 取一个
+
+                buy_shares = buy1[share_col]
+                sell_shares = sell1[share_col]
+
+                if buy_shares == sell_shares:  # redeem 与 apply 相等
+                    h.append((buy1, sell1))
+                    return DequeMatcher.recur_match_core(buy_deque, sell_deque, h,
+                                                         contract_col=contract_col,
+                                                         share_col=share_col,
+                                                         price_col=price_col,
+                                                         trade_type=trade_type,
+                                                         dt_col=dt_col)
+                elif buy_shares > sell_shares:
+
+                    remaining_num = buy_shares - sell_shares
+
+                    buy_sub_1 = copy.deepcopy(buy1)
+                    rd_buy_sub_1 = copy.deepcopy(buy1)
+
+                    buy_sub_1[share_col] = remaining_num
+                    rd_buy_sub_1[share_col] = sell_shares
+                    # buy_deque.appendleft(buy_sub_1)  # 放回去
+
+                    appendfunc(buy_deque, buy_sub_1)
+
+                    h.append((rd_buy_sub_1, sell1))
+
+                    return DequeMatcher.recur_match_core(buy_deque, sell_deque, h,
+                                                         contract_col=contract_col,
+                                                         share_col=share_col,
+                                                         price_col=price_col,
+                                                         trade_type=trade_type,
+                                                         dt_col=dt_col)
+
+                else:  # buy_shares < sell_shares
+
+                    sell_sub_1 = copy.deepcopy(sell1)
+                    rm_sell_sub_1 = copy.deepcopy(sell1)
+                    # rd_buy_sub_1 = buy1.copy(deep=True)
+                    rm_sell_sub_1[share_col] = buy_shares
+
+                    remaining_num = sell_shares - buy_shares
+                    sell_sub_1[share_col] = remaining_num
+
+                    # sell_deque.appendleft(sell_sub_1)  # 放回去
+                    h.append((buy1, rm_sell_sub_1))
+                    appendfunc(sell_deque, sell_sub_1)
+
+                    return DequeMatcher.recur_match_core(buy_deque, sell_deque, h,
+                                                         contract_col=contract_col,
+                                                         share_col=share_col,
+                                                         price_col=price_col,
+                                                         trade_type=trade_type,
+                                                         dt_col=dt_col)
+
+
 class Tools(object):
     @staticmethod
     def code_commodity_detect(code: str):
@@ -245,7 +438,7 @@ class Tools(object):
 
 class DerivativesProcessTools(object):
     @staticmethod
-    def _cal_xxx_cost_long(transactions, derivatives_list, dt_list, dt_col='报单日期', contract_col='委托合约'):
+    def _cal_xxx_cost(transactions, derivatives_list, dt_list, dt_col='报单日期', contract_col='委托合约'):
         """
 
         :param transactions:
@@ -262,16 +455,16 @@ class DerivativesProcessTools(object):
         return cum_xxx_df, open_unit_matrix, open_matrix
 
     @classmethod
-    def _cal_buy2open_cost(cls, m1_buy2open_transactions, derivatives_list, dt_list, dt_col='报单日期',
-                           contract_col='委托合约'):
-        return cls._cal_xxx_cost_long(m1_buy2open_transactions, derivatives_list, dt_list, dt_col=dt_col,
-                                      contract_col=contract_col)
+    def _cal_open_cost(cls, m1_buy2open_transactions, derivatives_list, dt_list, dt_col='报单日期',
+                       contract_col='委托合约'):
+        return cls._cal_xxx_cost(m1_buy2open_transactions, derivatives_list, dt_list, dt_col=dt_col,
+                                 contract_col=contract_col)
 
     @classmethod
-    def _cal_sell2close_cost(cls, m1_sell2close_transactions, derivatives_list, dt_list, dt_col='报单日期',
-                             contract_col='委托合约'):
-        return cls._cal_xxx_cost_long(m1_sell2close_transactions, derivatives_list, dt_list, dt_col=dt_col,
-                                      contract_col=contract_col)
+    def _cal_close_cost(cls, m1_sell2close_transactions, derivatives_list, dt_list, dt_col='报单日期',
+                        contract_col='委托合约'):
+        return cls._cal_xxx_cost(m1_sell2close_transactions, derivatives_list, dt_list, dt_col=dt_col,
+                                 contract_col=contract_col)
 
     @staticmethod
     def _create_executed_profit(end_dt, derivatives, contract_type, holding_value, lastdel_multi, sub_quote, net_unit):
@@ -315,6 +508,104 @@ class DerivativesProcessTools(object):
         return executed_profit
 
     @classmethod
+    def sub_parse_general_short(cls, end_dt, lastdel_multi, derivatives, sub_transactions, sub_quote, contract_type,
+                                open_symbol='卖开', close_symbol='买平'):
+
+        mask_close = sub_transactions['买卖开平'] == close_symbol
+        mask_open = sub_transactions['买卖开平'] == open_symbol
+
+        open_transactions = sub_transactions[mask_open]
+        close_transactions = sub_transactions[mask_close]
+
+        cum_cost_df, open_unit, buy2open = cls._cal_open_cost(open_transactions, [derivatives],
+                                                              sub_quote.index)
+        cum_buy_unit = open_unit.cumsum().ffill()
+
+        # 计算份额状态
+        if not close_transactions.empty:  # 如果存在卖出操作的话，计算卖出损益和剩余份数
+            # 有平仓就会为负数
+
+            cum_sold_value_df, sell2close_unit, sell2close = cls._cal_close_cost(close_transactions,
+                                                                                 [derivatives],
+                                                                                 sub_quote.index)
+
+            cum_sellvalue = sell2close[sell2close.index <= end_dt].fillna(0).cumsum()
+            cum_sellvalue_unit = sell2close_unit[sell2close_unit.index <= end_dt].fillna(0).cumsum()
+            net_unit = (cum_buy_unit[derivatives] - cum_sellvalue_unit.fillna(0)[derivatives]).to_frame(derivatives)
+        else:
+            cum_sellvalue = pd.DataFrame(index=buy2open.index, columns=[derivatives])
+            net_unit = cum_buy_unit[derivatives].to_frame(derivatives)
+        try:
+            holding_value = net_unit[derivatives] * sub_quote[derivatives]
+        except Exception as e:
+            raise e
+        if not isinstance(holding_value, pd.DataFrame):
+            holding_value = holding_value.to_frame(derivatives)
+
+        cum_cost_df = buy2open.reindex(index=sub_quote.index, columns=[derivatives]).fillna(0).cumsum()[[derivatives]]
+        # cum_sellvalue 设定为平仓价值，设定为负数，所以需要减（--）得正
+        # todo 逻辑有点绕
+        res_sub = holding_value - cum_cost_df - cum_sellvalue if not cum_sellvalue.dropna().empty else holding_value - cum_cost_df
+
+        # 期权需要行权收益，期货需要交割收益
+        executed_profit = cls._create_executed_profit(end_dt, derivatives, contract_type, holding_value,
+                                                      lastdel_multi, sub_quote, net_unit)
+
+        if open_symbol == '卖开':
+
+            return executed_profit * -1, res_sub * -1, holding_value * -1, net_unit * -1, cum_sellvalue * -1, cum_cost_df * -1
+
+        else:
+
+            return executed_profit, res_sub, holding_value, net_unit, cum_sellvalue, cum_cost_df
+
+    @classmethod
+    def sub_parse_general_long(cls, end_dt, lastdel_multi, derivatives, sub_transactions, sub_quote, contract_type,
+                               open_symbol='买开', close_symbol='卖平'):
+
+        mask_close = sub_transactions['买卖开平'] == close_symbol
+        mask_open = sub_transactions['买卖开平'] == open_symbol
+
+        open_transactions = sub_transactions[mask_open]
+        close_transactions = sub_transactions[mask_close]
+
+        cum_cost_df, open_unit, open_amt = cls._cal_open_cost(open_transactions, [derivatives],
+                                                              sub_quote.index)
+        cum_buy_unit = open_unit.cumsum().ffill()
+
+        # 计算份额状态
+        if not close_transactions.empty:  # 如果存在卖出操作的话，计算卖出损益和剩余份数
+
+            cum_sold_value_df, sell2close_unit, sell2close = cls._cal_close_cost(close_transactions,
+                                                                                 [derivatives],
+                                                                                 sub_quote.index)
+
+            cum_sellvalue = sell2close[sell2close.index <= end_dt].fillna(0).cumsum()
+            cum_sellvalue_unit = sell2close_unit[sell2close_unit.index <= end_dt].fillna(0).cumsum()
+            net_unit = (cum_buy_unit[derivatives] - cum_sellvalue_unit.fillna(0)[derivatives]).to_frame(derivatives)
+        else:
+            cum_sellvalue = pd.DataFrame(index=open_amt.index, columns=[derivatives])
+            net_unit = cum_buy_unit[derivatives].to_frame(derivatives)
+        try:
+            holding_value = net_unit[derivatives] * sub_quote[derivatives]
+        except Exception as e:
+            raise e
+        if not isinstance(holding_value, pd.DataFrame):
+            holding_value = holding_value.to_frame(derivatives)
+
+        cum_cost_df = open_amt.reindex(index=sub_quote.index, columns=[derivatives]).fillna(0).cumsum()[[derivatives]]
+
+        # cum_sellvalue 设定为平仓价值，设定为负数，所以需要减（--）得正
+        res_sub = holding_value - cum_cost_df - cum_sellvalue if not cum_sellvalue.dropna().empty else holding_value - cum_cost_df
+
+        # 期权需要行权收益，期货需要交割收益
+        executed_profit = cls._create_executed_profit(end_dt, derivatives,
+                                                      contract_type, holding_value,
+                                                      lastdel_multi, sub_quote, net_unit)
+
+        return executed_profit, res_sub, holding_value, net_unit, cum_sellvalue, cum_cost_df
+
+    @classmethod
     def sub_parse_general(cls, end_dt, lastdel_multi, derivatives, sub_transactions, sub_quote, contract_type,
                           open_symbol='买开', close_symbol='卖平'):
 
@@ -324,16 +615,16 @@ class DerivativesProcessTools(object):
         open_transactions = sub_transactions[mask_open]
         close_transactions = sub_transactions[mask_close]
 
-        cum_cost_df, buy2open_unit, buy2open = cls._cal_buy2open_cost(open_transactions, [derivatives],
-                                                                      sub_quote.index)
-        cum_buy_unit = buy2open_unit.cumsum().ffill()
+        cum_cost_df, open_unit, buy2open = cls._cal_open_cost(open_transactions, [derivatives],
+                                                              sub_quote.index)
+        cum_buy_unit = open_unit.cumsum().ffill()
 
         # 计算份额状态
         if not close_transactions.empty:  # 如果存在卖出操作的话，计算卖出损益和剩余份数
 
-            cum_sold_value_df, sell2close_unit, sell2close = cls._cal_sell2close_cost(close_transactions,
-                                                                                      [derivatives],
-                                                                                      sub_quote.index)
+            cum_sold_value_df, sell2close_unit, sell2close = cls._cal_close_cost(close_transactions,
+                                                                                 [derivatives],
+                                                                                 sub_quote.index)
 
             cum_sellvalue = sell2close[sell2close.index <= end_dt].fillna(0).cumsum()
             cum_sellvalue_unit = sell2close_unit[sell2close_unit.index <= end_dt].fillna(0).cumsum()
@@ -357,7 +648,9 @@ class DerivativesProcessTools(object):
                                                       lastdel_multi, sub_quote, net_unit)
 
         if open_symbol == '卖开':
+
             return executed_profit * -1, res_sub * -1, holding_value * -1, net_unit * -1, cum_sellvalue * -1, cum_cost_df * -1
+
         else:
 
             return executed_profit, res_sub, holding_value, net_unit, cum_sellvalue, cum_cost_df
@@ -387,7 +680,7 @@ class DerivativesProcessTools(object):
 
         #  long
         if not sub_transactions[sub_transactions['买卖开平'].isin(['买开', '卖平'])].empty:
-            long_executed_profit, long_res_sub, long_holding_value, long_net_unit, long_cum_sellvalue, long_cum_cost_df = cls.sub_parse_general(
+            long_executed_profit, long_res_sub, long_holding_value, long_net_unit, long_cum_sellvalue, long_cum_cost_df = cls.sub_parse_general_long(
                 end_dt, lastdel_multi, derivatives, sub_transactions,
                 sub_quote, contract_type, open_symbol='买开', close_symbol='卖平')
         else:
@@ -397,11 +690,11 @@ class DerivativesProcessTools(object):
                 columns=[derivatives]), pd.DataFrame(columns=[derivatives])
         # short
         if not sub_transactions[sub_transactions['买卖开平'].isin(['卖开', '买平'])].empty:
-            short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_openvalue, short_cum_cost_df = cls.sub_parse_general(
+            short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_sellvalue, short_cum_cost_df = cls.sub_parse_general_short(
                 end_dt, lastdel_multi, derivatives, sub_transactions,
                 sub_quote, contract_type, open_symbol='卖开', close_symbol='买平')
         else:
-            short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_openvalue, short_cum_cost_df = pd.DataFrame(
+            short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_sellvalue, short_cum_cost_df = pd.DataFrame(
                 columns=[derivatives]), pd.DataFrame(columns=[derivatives]), pd.DataFrame(
                 columns=[derivatives]), pd.DataFrame(columns=[derivatives]), pd.DataFrame(
                 columns=[derivatives]), pd.DataFrame(columns=[derivatives])
@@ -415,7 +708,7 @@ class DerivativesProcessTools(object):
             result_holder = {derivatives: (
                 long_executed_profit, long_res_sub, long_holding_value, long_net_unit, long_cum_sellvalue,
                 long_cum_cost_df,
-                short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_openvalue,
+                short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_sellvalue,
                 short_cum_cost_df)}
 
             return result_holder
@@ -423,7 +716,7 @@ class DerivativesProcessTools(object):
             return (
                 long_executed_profit, long_res_sub, long_holding_value, long_net_unit, long_cum_sellvalue,
                 long_cum_cost_df,
-                short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_openvalue,
+                short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_sellvalue,
                 short_cum_cost_df)
 
 
@@ -581,6 +874,10 @@ class ProcessReportLoadingTools(Tools):
         # 补全合约全名
         _parsed_report[target_cols[0]] = _parsed_report[target_cols[0]].replace(contracts_translated_dict)
 
+        _parsed_report['报单时间'] = _parsed_report['报单时间'].fillna('00:00:00')
+        dt = _parsed_report['报单日期'].astype(str) + ' ' + _parsed_report['报单时间']
+        _parsed_report['报单日期时间'] = pd.to_datetime(dt, format='%Y%m%d %H:%M:%S')
+
         return _parsed_report
 
     @staticmethod
@@ -717,6 +1014,10 @@ class ProcessReportLoadingTools(Tools):
 
         _parsed_report['委托合约'] = _parsed_report['委托合约'].replace(contracts_translated_dict)
 
+        _parsed_report['报单时间'] = _parsed_report['报单时间'].fillna('00:00:00')
+        dt = _parsed_report['报单日期'].astype(str) + ' ' + _parsed_report['报单时间']
+        _parsed_report['报单日期时间'] = pd.to_datetime(dt, format='%Y%m%d %H:%M:%S')
+
         return _parsed_report
 
 
@@ -778,7 +1079,7 @@ class ProcessReportDataTools(object):
 
 class ProcessReportSingle(ProcessReportLoadingTools, ProcessReportDataTools):  # , ProcessReportCalculationTools
     def __init__(self, dt, report_file_path: str = 'report.csv',
-                 target_cols=['委托合约', '买卖', '开平', '手数', '成交均价', '报单时间', '报单日期'],
+                 target_cols=['委托合约', '买卖', '开平', '手数', '成交均价', '报单时间', '报单日期', '报单日期时间'],
 
                  name_process_rule={'MO\d{4}-[CP]-[0-9]+': 'CFE',
                                     'HO\d{4}-[CP]-[0-9]+': 'CFE',
@@ -851,7 +1152,7 @@ class ProcessReport(ProcessReportSingle):
                  report_file_path: str = 'C:\\Users\\linlu\\Documents\\GitHub\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
                  daily_report='report*.csv',
                  period_report='report*-*.xlsx',
-                 target_cols=['委托合约', '买卖', '开平', '手数', '成交均价', '报单时间', '报单日期'],
+                 target_cols=['委托合约', '买卖', '开平', '手数', '成交均价', '报单时间', '报单日期', '报单日期时间'],
                  buysell_cols_replace={'买\u3000': '买', '\u3000卖': '卖'},
                  openclose_cols_replace={'开仓': '开', '平仓': '平', '平昨': '平', '平今': '平'},
                  contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll',
@@ -882,12 +1183,47 @@ class ProcessReport(ProcessReportSingle):
                             reduced=False, return_df=False, ):
         transactions = self.reduced_transactions if reduced else self._transactions
 
+        # transactions = transactions[['报单日期', '报单时间']].apply(lambda x, y: x + ' ' + y)
+
         merged_transactions = pd.merge(transactions, last_deliv_and_multi.reset_index(),
                                        left_on='委托合约', right_on='委托合约')
 
         transactions = self.prepare_transactions(merged_transactions, trade_type_mark=trade_type_mark)
 
         return transactions if return_df else DerivativesItemHolder(transactions)
+
+    def create_current_cost_price(self, lastdel_multi,
+                                  trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, },
+                                  contract_col='委托合约',
+                                  share_col='手数',
+                                  price_col='成交均价',
+                                  trade_type='trade_type',
+                                  dt_col='报单日期时间', method='FIFO'):
+        # 处理交易对，计算开仓成本
+        transcations_multi = self.create_transactions(lastdel_multi, reduced=False, return_df=True,
+                                                      trade_type_mark=trade_type_mark)  # .sort_values('报单日期')
+
+        avg_transcripts_dict = dict()
+        avg_price = []
+        for k, direct, v in DequeMatcher.multi_contract_recus_match_v2(transcations_multi,
+                                                                       contract_col=contract_col,
+                                                                       share_col=share_col,
+                                                                       price_col=price_col,
+                                                                       trade_type=trade_type,
+                                                                       dt_col=dt_col, method=method):
+            avg_transcripts_dict[(k, direct)] = v
+            avg_price.append([k, direct, v[0]])
+
+        avg_price_df = pd.DataFrame(filter(lambda x: x[-1] is not None, avg_price),
+                                    columns=['contract_code', '持仓方向', '平均开仓成本'])
+        res_avg_price_df = pd.merge(avg_price_df, lastdel_multi[['EXE_DATE','CONTRACTMULTIPLIER']].reset_index(),
+                                    left_on=['contract_code'], right_on=['委托合约'], how='left').drop_duplicates()
+        res_avg_price_rd_df = res_avg_price_df[res_avg_price_df['EXE_DATE'] >= datetime.datetime.today()]
+        # contract_list = res_avg_price_rd_df['contract_code'].unique()
+        # contract_mask = res_avg_price_rd_df['contract_code'].isin(contract_list)
+
+
+        return res_avg_price_rd_df
 
     @staticmethod
     def conct_and_rd_all_zero_rows_and_parse_more(long_cum_cost_df):
@@ -1429,7 +1765,7 @@ if __name__ == '__main__':
 
                                                     )
 
-    person_holder,  merged_summary_dict, contract_summary_dict = PR.group_by_summary(
+    person_holder, merged_summary_dict, contract_summary_dict = PR.group_by_summary(
         info_dict, return_data=True)
 
     # PR.summary_person_info(person_summary_dict, merged_summary_dict, info_dict, lastdel_multi, quote, )
