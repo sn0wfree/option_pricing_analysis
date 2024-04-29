@@ -3,7 +3,7 @@ import os
 
 import pandas as pd
 
-from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst, Configs
+from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst, Configs, Tools
 
 
 def chunk(obj, chunks=2000):
@@ -58,23 +58,6 @@ class DerivativeSummary(ReportAnalyst):
     def cal_year_result(cls, df, pnl_col, nv_col):
         for k, v in cls._cal_year_result('cal_year_result', df[pnl_col], df[nv_col]):
             yield k, v
-        # years = range(start_year, datetime.datetime.today().year + 1)
-        # 收益
-        # res = df[pnl_col].resample('Y').last()
-        # res.index = res.index.year
-        # y1 = res.head(1)
-        # res2 = pd.concat([y1, res.diff(1).dropna()], axis=0)
-        # res2.index = list(map(lambda x: str(x) + '年收益', res2.index))
-        # for amt_k, amt_v in res2.to_dict().items():
-        #     yield amt_k, amt_v
-        # # 收益率
-        # nv_ret = df[nv_col].resample('Y').last()
-        # nv_ret.index = nv_ret.index.year
-        # y1 = nv_ret.head(1) - 1
-        # nv_ret2 = pd.concat([y1, nv_ret.pct_change(1).dropna()], axis=0)
-        # nv_ret2.index = list(map(lambda x: str(x) + '年收益率', nv_ret2.index))
-        # for ret_k, ret_v in nv_ret2.to_dict().items():
-        #     yield ret_k, ret_v
 
     @classmethod
     def cal_periods_result_v2(cls, df, pnl_col, nv_col, ):
@@ -357,13 +340,16 @@ class DerivativeSummary(ReportAnalyst):
                 current_pnl = df.diff(1)['累计净损益(右轴)'].to_frame(person)
                 c_pnl = current_pnl.tail(1)
                 c_pnl.index = ['当日损益']
+
                 res = df.resample('Y').last()['累计净损益(右轴)'].to_frame(person)
                 res.index = res.index.year
                 y1 = res.head(1)
                 cum = res.tail(1)
                 cum.index = ['累计']
+
                 res_out = res.diff(1).dropna()
-                merged_person1 = pd.concat([c_pnl, y1, res_out, cum], axis=0)
+
+                merged_person1 = pd.concat([c_pnl, y1, res_out, cum, ], axis=0)
                 yield merged_person1
 
     @staticmethod
@@ -419,7 +405,7 @@ class DerivativeSummary(ReportAnalyst):
         person_holder, merged_summary_dict, contract_summary_dict = PR.group_by_summary(
             info_dict, return_data=True, store_2_excel=False)
 
-        target_cols = ['持仓方向', '持仓手数', '平均开仓成本','现价', '当日收益', '当日收益率', '累计收益',
+        target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价', '当日收益', '当日收益率', '累计收益',
                        '累计收益率', '持仓名义市值', '平仓价值', '行权价值', '近一周收益', '近一周收益率',
                        '近一月收益', '近一月收益率', ]
 
@@ -433,6 +419,9 @@ class DerivativeSummary(ReportAnalyst):
         person_by_year_summary = pd.concat(
             self.process_person_by_year(person_holder, person_list=output_config['汇总']), axis=1)
         person_by_year_summary['累计盈亏'] = person_by_year_summary.sum(axis=1)
+        person_by_year_summary.index.name = '统计维度'
+
+
 
         # 期货多头：分人分年度分品种
         # person_cum_sub 要输出的
@@ -443,10 +432,10 @@ class DerivativeSummary(ReportAnalyst):
 
         person_contract_summary = person_contract_summary_all.loc[(output_config['期货多头'], slice(None)), :]
         person_cum_sub = person_cum_sub_all.loc[output_config['期货多头'], :]
+        person_cum_sub.index.name = '交易员'
 
         # person_contract_summary, person_cum_sub = self.process_ph(person_holder, person_list=output_config['期货多头'],
         #                                                           return_cum=True)
-        # 缺一个汇总的
 
         # 期货多头：分品种
         _, commodity_cum_sub = self.process_ph(merged_summary_dict, person_list=output_config['分品种'],
@@ -458,7 +447,7 @@ class DerivativeSummary(ReportAnalyst):
         comm_cum_sub.index.name = '品种'
 
         # 分人分合约统计
-
+        contracts = PR.reduced_contracts()
         c, p, s, comm = list(
             zip(*list(self.contract_link_person(contracts, contract_2_person_rule=self.contract_2_person_rule))))
         c2p = dict(zip(c, p))
@@ -477,7 +466,7 @@ class DerivativeSummary(ReportAnalyst):
                                                              price_col=price_col,
                                                              trade_type=trade_type,
                                                              dt_col='报单日期时间',
-                                                             method='FIFO')
+                                                             method=method)
 
         hld_contracts_smy_mrgd2 = pd.merge(hld_contracts_smy_mrgd,
                                            res_avg_price_rd_df[
@@ -486,62 +475,140 @@ class DerivativeSummary(ReportAnalyst):
         hld_contracts_smy_mrgd2.index = hld_contracts_smy_mrgd.index
 
         hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['持仓名义市值'] / (
-                    hld_contracts_smy_mrgd2['持仓手数'] * hld_contracts_smy_mrgd2[
-                'CONTRACTMULTIPLIER'])
+                hld_contracts_smy_mrgd2['持仓手数'] * hld_contracts_smy_mrgd2[
+            'CONTRACTMULTIPLIER'])
 
         hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['现价'].abs()
 
         holding_contracts_summary_merged_sorted = hld_contracts_smy_mrgd2[
             target_cols + sorted(set(year_cols))]
+        holding_contracts_summary_merged_sorted.index.names = ['交易员', '统计维度']
 
         return person_by_year_summary, person_cum_sub, comm_cum_sub, holding_contracts_summary_merged_sorted
+
+    def auto_run(self, output_config,
+                 quote_start_with='2022-06-04',
+                 trade_type_mark={"卖开": 1, "卖平": -1,
+                                  "买开": 1, "买平": -1,
+                                  "买平今": -1, }):
+
+        # config = Configs(conf_file=conf_file)
+
+        today = datetime.datetime.today()
+        # today_str = pd.to_datetime(today).strftime('%Y%m%d')
+
+        contracts = self.reduced_contracts()
+        wh = WindHelper()
+        # ---------------------------
+
+        quote = self.get_quote_and_info(contracts, wh, start_with=quote_start_with)
+
+        lastdel_multi = self.get_info_last_delivery_multi(contracts, wh)
+
+        info_dict = self.parse_transactions_with_quote_v2(quote, lastdel_multi,
+                                                          trade_type_mark=trade_type_mark)
+
+        person_holder_dict, merged_summary_dict, contract_summary_dict = self.group_by_summary(info_dict,
+                                                                                               return_data=True,
+                                                                                               store_2_excel=False)
+
+        person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted = self.output_v2(
+            info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
+
+        store_path = self.create_daily_summary_file_path(output_path='./', version='v3')
+
+        with pd.ExcelWriter(store_path) as f:
+            person_by_year_summary.to_excel(f, 'person_by_year_summary')
+            person_cum_sub.to_excel(f, 'person_cum_sub')
+            commodity_cum_sub.to_excel(f, 'commodity_cum_sub')
+            holding_summary_merged_sorted.to_excel(f, 'holding_summary_merged_sorted')
+
+            for name, data in sorted(person_holder_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+                data.index = data.index.strftime('%Y-%m-%d')
+                data.to_excel(f, name)
+                Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+                print(f"{name} output!")
+
+            ## 分人分项目分年度计算盈亏
+            # for name, data in sorted(person_ls_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+            #     data.index = data.index.strftime('%Y-%m-%d')
+            #     data.to_excel(f, name)
+            #     Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+            #     print(f"{name} output!")
+
+            ## 分合约计算盈亏
+            for name, data in sorted(merged_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+                data.index = data.index.strftime('%Y-%m-%d')
+                data.to_excel(f, name)
+                Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+                print(f"{name} output!")
+
+            for name, data in sorted(contract_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
+                data.index = data.index.strftime('%Y-%m-%d')
+                data.to_excel(f, name)
+                Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
+                print(f"{name} output!")
+
+            info_dict['衍生品多头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头持仓价值截面')
+            info_dict['衍生品多头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品多头累计开仓成本')
+            info_dict['衍生品多头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头累计平仓价值')
+            info_dict['衍生品多头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计行权收益')
+            info_dict['衍生品多头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计净损益')
+            info_dict['衍生品多头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品多头剩余合约数')
+
+            info_dict['衍生品空头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头持仓价值截面')
+            info_dict['衍生品空头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品空头累计开仓成本')
+            info_dict['衍生品空头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头累计平仓价值')
+            info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计行权收益')
+            info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计净损益')
+            info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
 
 
 if __name__ == '__main__':
     # dt = pd.to_datetime('2024-04-19').strftime("%Y%m%d")
 
     config = Configs()
-    today = datetime.datetime.today()
-    today_str = pd.to_datetime(today).strftime('%Y%m%d')
-
-    wh = WindHelper()
-
+    # today = datetime.datetime.today()
+    # today_str = pd.to_datetime(today).strftime('%Y%m%d')
+    #
+    # wh = WindHelper()
+    #
     PR = DerivativeSummary(
         report_file_path=config['report_file_path'],
         contract_2_person_rule=config['contract_2_person_rule']
     )
+    #
+    # contracts = PR.reduced_contracts()
+    #
+    # quote = PR.get_quote_and_info(contracts, wh, start_with='2022-06-04')
+    #
+    # lastdel_multi = PR.get_info_last_delivery_multi(contracts, wh)
+    #
+    # info_dict = PR.parse_transactions_with_quote_v2(quote, lastdel_multi,
+    #                                                 trade_type_mark={"卖开": 1, "卖平": -1,
+    #                                                                  "买开": 1, "买平": -1,
+    #                                                                  "买平今": -1, }
+    #
+    #                                                 )
+    #
+    # person_holder, merged_summary_dict, contract_summary_dict = PR.group_by_summary(
+    #     info_dict, return_data=True, store_2_excel=True)
+    #
+    # person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted = PR.output_v2(
+    #     info_dict, lastdel_multi, config['output_config'], dt=today, trade_type_mark={"卖开": 1, "卖平": -1,
+    #                                                                                   "买开": 1, "买平": -1,
+    #                                                                                   "买平今": -1, })
+    #
+    # with pd.ExcelWriter(f'输出指标统计@{today_str}.xlsx') as f:
+    #     person_by_year_summary.to_excel(f, 'person_by_year_summary')
+    #     person_cum_sub.to_excel(f, 'person_cum_sub')
+    #     commodity_cum_sub.to_excel(f, 'commodity_cum_sub')
+    #     holding_summary_merged_sorted.to_excel(f, 'holding_summary_merged_sorted')
 
-    contracts = PR.reduced_contracts()
+    PR.auto_run(config['output_config'],
+                quote_start_with='2022-06-04',
+                trade_type_mark={"卖开": 1, "卖平": -1,
+                                 "买开": 1, "买平": -1,
+                                 "买平今": -1, })
 
-    quote = PR.get_quote_and_info(contracts, wh, start_with='2022-06-04')
-
-    lastdel_multi = PR.get_info_last_delivery_multi(contracts, wh)
-
-    info_dict = PR.parse_transactions_with_quote_v2(quote, lastdel_multi,
-                                                    trade_type_mark={"卖开": 1, "卖平": -1,
-                                                                     "买开": 1, "买平": -1,
-                                                                     "买平今": -1, }
-
-                                                    )
-
-    person_holder, merged_summary_dict, contract_summary_dict = PR.group_by_summary(
-        info_dict, return_data=True, store_2_excel=True)
-
-    output_config = {'汇总': ['wj', 'gr', 'll'],
-                     '期货多头': ['wj', 'gr'],
-                     '期货对冲': ['IM'],
-                     '分品种': 'ALL', }
-
-    person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted = PR.output_v2(
-        info_dict, lastdel_multi, output_config, dt=today, trade_type_mark={"卖开": 1, "卖平": -1,
-                                                                            "买开": 1, "买平": -1,
-                                                                            "买平今": -1, })
-
-    with pd.ExcelWriter(f'输出指标统计@{today_str}.xlsx') as f:
-        person_by_year_summary.to_excel(f, 'person_by_year_summary')
-        person_cum_sub.to_excel(f, 'person_cum_sub')
-        commodity_cum_sub.to_excel(f, 'commodity_cum_sub')
-        holding_summary_merged_sorted.to_excel(f, 'holding_summary_merged_sorted')
-
-    print(1)
     pass

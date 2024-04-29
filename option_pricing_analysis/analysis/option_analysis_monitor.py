@@ -1216,12 +1216,11 @@ class ProcessReport(ProcessReportSingle):
 
         avg_price_df = pd.DataFrame(filter(lambda x: x[-1] is not None, avg_price),
                                     columns=['contract_code', '持仓方向', '平均开仓成本'])
-        res_avg_price_df = pd.merge(avg_price_df, lastdel_multi[['EXE_DATE','CONTRACTMULTIPLIER']].reset_index(),
+        res_avg_price_df = pd.merge(avg_price_df, lastdel_multi[['EXE_DATE', 'CONTRACTMULTIPLIER']].reset_index(),
                                     left_on=['contract_code'], right_on=['委托合约'], how='left').drop_duplicates()
         res_avg_price_rd_df = res_avg_price_df[res_avg_price_df['EXE_DATE'] >= datetime.datetime.today()]
         # contract_list = res_avg_price_rd_df['contract_code'].unique()
         # contract_mask = res_avg_price_rd_df['contract_code'].isin(contract_list)
-
 
         return res_avg_price_rd_df
 
@@ -1488,13 +1487,13 @@ class SummaryFunctions(object):
                 yield contract, None, con_type, commodity_type
 
     @staticmethod
-    def create_daily_summary_file_path(output_path='./'):
+    def create_daily_summary_file_path(output_path='./', version='v2'):
         if output_path is None:
             output_path = './'
 
         today_str = pd.to_datetime(datetime.datetime.today()).strftime('%Y%m%d')
 
-        output_name_format = f'日度衍生品交易收益率统计及汇总@{today_str}v2.xlsx'
+        output_name_format = f'日度衍生品交易收益率统计及汇总@{today_str}{version}.xlsx'
 
         _path = os.path.join(output_path, output_name_format)
 
@@ -1716,8 +1715,8 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
 
 
 class Configs(object):
-    def __init__(self):
-        full_path = detect_file_full_path(conf_file='config.yml')
+    def __init__(self, conf_file='config.yml'):
+        full_path = detect_file_full_path(conf_file=conf_file)
         with open(full_path, 'r', encoding="utf-8") as f:
             self.config = yaml.load(f.read(), Loader=yaml.FullLoader)
 

@@ -167,4 +167,4 @@ if __name__ == '__main__':
     CombinedOptiondf = CombinedOptiondf[
         ['IV', 'Vega', 'OptionType', 'StrikePrice', 'OptionContShortName', 'YM', 'RequestTimeStamp']]
     # ---------------
-    print IVXTable(CombinedOptiondf, current).getIVXX(X=30)
+    print(IVXTable(CombinedOptiondf, current).getIVXX(X=30))

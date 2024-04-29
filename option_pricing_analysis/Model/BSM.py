@@ -2,7 +2,8 @@
 
 import numpy as np
 import scipy.stats as sps
-from scipy.optimize import brentq
+from scipy.optimize import brentq, newton
+from scipy.stats import norm
 
 
 def timer(func):
@@ -109,6 +110,26 @@ class BlackScholesOptionPricingModel(object):
 
 class OptionPricing(object):
     __slots__ = ()
+
+    @classmethod
+    def BSPricingSimple(cls, S, K, r, T, sigma, cp_sign, *args, **kwargs):
+        if cp_sign == 1:
+            return cls.BSPricingSimpleCall(S, K, r, T, sigma)
+        else:
+            return cls.BSPricingSimplePut(S, K, r, T, sigma)
+
+    @staticmethod
+    def BSPricingSimpleCall(S, K, r, T, sigma):
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+
+    @staticmethod
+    def BSPricingSimplePut(S, K, r, T, sigma):
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        put_price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+        return put_price
 
     @staticmethod
     def BSPricing(s, k, r, t, sigma, cp_sign, g=0, dividends='continuous', self_cal=False, IV_LOWER_BOUND=1e-8):
@@ -254,7 +275,30 @@ class ImpliedVolatility(object):
         self.pricing_f = pricing_f
         self.method = method
 
-        pass
+    def implied_volatility_smart(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
+                                 IV_LOWER_BOUND=1e-8, method=None, **kwargs):
+
+        try:
+            return self.implied_volatility_brent(S, K, r, T, option_market_price, cp_sign, g, dividends=dividends,
+                                                 IV_LOWER_BOUND=IV_LOWER_BOUND, method=method, **kwargs)
+        except Exception as e:
+
+            return self.implied_volatility_newton(S, K, r, T, option_market_price, cp_sign, g,
+                                                  dividends=dividends, IV_LOWER_BOUND=IV_LOWER_BOUND, method=method,
+                                                  **kwargs)
+
+    def implied_volatility_newton(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
+                                  IV_LOWER_BOUND=1e-8, method=None, **kwargs):
+        if method is None:
+            callback = getattr(self.pricing_f, self.method)
+        else:
+            callback = getattr(self.pricing_f, method)
+
+        func = lambda sigma: callback(S, K, r, T, sigma, cp_sign, g,
+                                      dividends=dividends, **kwargs) - option_market_price
+
+        implied_vol = newton(func, x0=0.02, )
+        return max(implied_vol, IV_LOWER_BOUND),func(implied_vol)
 
     @timer
     def implied_volatility_brent(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
@@ -274,19 +318,37 @@ class ImpliedVolatility(object):
         :param IV_LOWER_BOUND:
         :return:
         """
-        callback = getattr(self.pricing_f, self.method) if method is None else getattr(self.pricing_f, method)
+        max_iter = 20
+        if method is None:
+            callback = getattr(self.pricing_f, self.method)
+        else:
+            callback = getattr(self.pricing_f, method)
 
-        func = lambda sigma: option_market_price - callback(S, K, r, T, sigma, cp_sign, g,
-                                                            dividends=dividends, **kwargs)
+        func = lambda sigma: callback(S, K, r, T, sigma, cp_sign, g,
+                                      dividends=dividends, **kwargs) - option_market_price
+        a, b = IV_LOWER_BOUND, 1
 
-        try:
-            v = brentq(func, 0, 10)
+        fa = func(a)
+        fb = func(b)
+        iter_count = 0
+        while fa * fb > 0 and iter_count < max_iter:
+            if abs(fa) < abs(fb):
+                a /= 20  # Decrease a if f(a) is closer to zero
+            else:
+                b *= 1.5  # Increase b if f(b) is closer to zero
+            fa = func(a, )
+            fb = func(b, )
+            iter_count += 1
 
-            return max(v, IV_LOWER_BOUND)
-        except Exception as e:
-            raise e
-            print('will return tiny zero')
-            return IV_LOWER_BOUND
+        if fa * fb < 0:
+            v = brentq(func, a, b)
+            ret_iv = max(v, IV_LOWER_BOUND)
+
+            diff = func(ret_iv, )
+            return ret_iv, diff
+        else:
+            diff = func(IV_LOWER_BOUND, )
+            return IV_LOWER_BOUND, diff
 
     def Implied_volatility_Call(self, S, K, r, T, market_option_price, g=0, dividends='continuous'):
         return self.implied_volatility_brent(market_option_price, S, K, r, T, cp_sign='call', g=g, dividends=dividends)
@@ -379,13 +441,13 @@ if __name__ == '__main__':
     iv_func = ImpliedVolatility(pricing_f=OptionPricing, method='MCPricing').implied_volatility_brent
     s, x, r, t, cp_sign, g = 5473.55, 4950, 0.015, 28 / 250, -1, 0
 
-    cp_free = 51.4
+    cp_fee = 51.4
 
     print('BS')
-    iv = iv_func(s, x, r, t, cp_free, cp_sign, g, method='BSPricing')
+    iv = iv_func(s, x, r, t, cp_fee, cp_sign, g, method='BSPricing')
     # iv_old = ImpliedVolatility(pricing_f=op).ImpliedVolatility_OlD(s, x, r, t, cp, cp_sign, g)
     # print cp,sigma,CalImpliedVolatility(s,x,r,t,cp,cp_sign,g)
-    print(cp_free, iv)
+    print(cp_fee, iv)
 
     # print('MC')
     # iv = iv_func(s, x, r, t, cp_free, cp_sign, g, method='MCPricing')
