@@ -1,7 +1,9 @@
 import datetime
 import os
+from glob import glob
 
 import pandas as pd
+from ClickSQL import BaseSingleFactorTableNode
 
 from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst, Configs, Tools
 
@@ -310,6 +312,8 @@ class DerivativeSummary(ReportAnalyst):
 
     def output_summary(self, person_holder, info_dict, lastdel_multi, base_store_path=None, return_data=False,
                        dt=datetime.datetime.today(), ):
+
+        contracts = self.reduced_contracts()
         person_contract_summary = self.process_ph(person_holder)
         # columns = ['contract', 'person', 'symbol', 'commodity']
         c, p, s, comm = list(
@@ -420,8 +424,6 @@ class DerivativeSummary(ReportAnalyst):
             self.process_person_by_year(person_holder, person_list=output_config['汇总']), axis=1)
         person_by_year_summary['累计盈亏'] = person_by_year_summary.sum(axis=1)
         person_by_year_summary.index.name = '统计维度'
-
-
 
         # 期货多头：分人分年度分品种
         # person_cum_sub 要输出的
@@ -565,50 +567,30 @@ class DerivativeSummary(ReportAnalyst):
 
 
 if __name__ == '__main__':
-    # dt = pd.to_datetime('2024-04-19').strftime("%Y%m%d")
+    from upload import UploadDailyInfo
+
+
 
     config = Configs()
-    # today = datetime.datetime.today()
-    # today_str = pd.to_datetime(today).strftime('%Y%m%d')
-    #
-    # wh = WindHelper()
-    #
+
     PR = DerivativeSummary(
         report_file_path=config['report_file_path'],
-        contract_2_person_rule=config['contract_2_person_rule']
-    )
-    #
-    # contracts = PR.reduced_contracts()
-    #
-    # quote = PR.get_quote_and_info(contracts, wh, start_with='2022-06-04')
-    #
-    # lastdel_multi = PR.get_info_last_delivery_multi(contracts, wh)
-    #
-    # info_dict = PR.parse_transactions_with_quote_v2(quote, lastdel_multi,
-    #                                                 trade_type_mark={"卖开": 1, "卖平": -1,
-    #                                                                  "买开": 1, "买平": -1,
-    #                                                                  "买平今": -1, }
-    #
-    #                                                 )
-    #
-    # person_holder, merged_summary_dict, contract_summary_dict = PR.group_by_summary(
-    #     info_dict, return_data=True, store_2_excel=True)
-    #
-    # person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted = PR.output_v2(
-    #     info_dict, lastdel_multi, config['output_config'], dt=today, trade_type_mark={"卖开": 1, "卖平": -1,
-    #                                                                                   "买开": 1, "买平": -1,
-    #                                                                                   "买平今": -1, })
-    #
-    # with pd.ExcelWriter(f'输出指标统计@{today_str}.xlsx') as f:
-    #     person_by_year_summary.to_excel(f, 'person_by_year_summary')
-    #     person_cum_sub.to_excel(f, 'person_cum_sub')
-    #     commodity_cum_sub.to_excel(f, 'commodity_cum_sub')
-    #     holding_summary_merged_sorted.to_excel(f, 'holding_summary_merged_sorted')
+        contract_2_person_rule=config['contract_2_person_rule'])
 
-    PR.auto_run(config['output_config'],
-                quote_start_with='2022-06-04',
-                trade_type_mark={"卖开": 1, "卖平": -1,
-                                 "买开": 1, "买平": -1,
-                                 "买平今": -1, })
+    PR.auto_run(config['output_config'], quote_start_with='2022-06-04', trade_type_mark={"卖开": 1, "卖平": -1,
+                                                                                         "买开": 1, "买平": -1,
+                                                                                         "买平今": -1, })
+
+    file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v3.xlsx')))
+
+    # result_dict = pd.read_excel(file_name, sheet_name=None)
+    # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
+    # sql_dict = config['sql_dict']
+    # traders = config['output_config']['汇总']
+
+    node = BaseSingleFactorTableNode(config['src'])
+    UDI = UploadDailyInfo(file_name)
+    UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
+                   traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
 
     pass

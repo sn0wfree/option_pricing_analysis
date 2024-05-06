@@ -11,7 +11,7 @@ def idx_quote(symbol='sh000852'):
 
 
 def map_cal_option_iv(option_quote):
-    iv_func = ImpliedVolatility(pricing_f=OptionPricing, method='MCPricing').implied_volatility_brent
+    iv_func = ImpliedVolatility(pricing_f=OptionPricing, method='MCPricing').iv_brent
     iv = [iv_func(s, x, r, t, cp_fee, cp_sign, g) for s, x, r, t, cp_fee, cp_sign, g in option_quote.values]
     return iv
 

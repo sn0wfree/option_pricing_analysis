@@ -3,6 +3,7 @@ import datetime
 import os
 
 import akshare as ak
+import numpy as np
 import pandas as pd
 from ClickSQL import BaseSingleFactorTableNode
 from CodersWheel.QuickTool.boost_up import boost_up
@@ -65,18 +66,12 @@ class MOQuoteQuickMatrix(object):
                  method='BSPricing',
                  ):
         _sub_sql = f"select * from quote.view_quote_mo where trade_date>='{start}' and trade_date<='{end}'"
-
-        self._iv_func = ImpliedVolatility(pricing_f=OptionPricing, method=method).implied_volatility_brent
-
+        self._iv_func = ImpliedVolatility(pricing_f=OptionPricing, method=method).iv_brent
         self._conn = conn
         self._raw = self.query(_sub_sql)
-
         # self._underlying_quote = underlying_quote
-
         self._raw['prefix'] = self._raw['contract_code'].apply(lambda x: x[:underlying_endpos])
-
         self._raw['ym'] = self._raw['contract_code'].apply(lambda x: x[underlying_endpos:underlying_endpos + ym_length])
-
         self._raw['cp'] = self._raw['contract_code'].apply(
             lambda x: x[underlying_endpos + ym_length:underlying_endpos + ym_length + cp_length].strip('-').lower())
 
@@ -112,16 +107,10 @@ class MOQuoteQuickMatrix(object):
         for by_item, item in data.groupby(by):
             yield by_item, item
 
-    def _diff_k_by_ym_(self, underlying_quote, lastdel_multi,
-                       dt_start=None,
-                       ym_start=None,
-                       strike_start=None,
-                       cp=['p', 'c'],
-                       prefix='mo',
-                       r=0.015, g=0, ):
+    def _diff_k_by_ym_(self, underlying_quote, lastdel_multi, dt_start=None, ym_start=None, strike_start=None,
+                       cp=['p', 'c'], prefix='mo', r=0.015, g=0, boost=False):
         for by_item, df in self._fast_group_iter_(by=['trade_date', 'ym'], dt_start=dt_start, ym_start=ym_start,
-                                                  strike_start=strike_start,
-                                                  cp=cp, prefix=prefix):
+                                                  strike_start=strike_start, cp=cp, prefix=prefix):
             dt = df['trade_date'].unique().tolist()[0]
             ym = df['ym'].unique().tolist()[0]
             cp_sign = df['cp'].replace({"c": 1, "p": -1}).unique().tolist()[0]
@@ -138,16 +127,20 @@ class MOQuoteQuickMatrix(object):
 
             func = self._iv_func
 
-            for k, fee in df[['strike', 'close']].values:
-                iv, diff = func(s, k, r, t, fee, cp_sign, g)
+            if boost:
 
-                # tasks = [(s, k, r, t, fee, cp_sign, g) for k, fee in df[['strike', 'close']].values]
+                tasks = [(s, k, r, t, fee, cp_sign, g) for k, fee in df[['strike', 'close']].values]
 
-                # result = boost_up(func, tasks, star=True)
-                # for (k, fee), (iv, diff) in zip(df[['strike', 'close']].values, result):
-                # iv, diff = self._iv_func(s, k, r, t, fee, cp_sign, g, method='BSPricing')
-                # # dt ym cp k fee iv
-                yield *by_item, k, fee, iv, diff
+                result = boost_up(func, tasks, star=True)
+                for (k, fee), (iv, diff) in zip(df[['strike', 'close']].values, result):
+                    iv, diff = func(s, k, r, t, fee, cp_sign, g, method='BSPricing')
+                    # # dt ym cp k fee iv
+                    yield *by_item, k, fee, iv, np.round(diff, 4)
+            else:
+                for k, fee in df[['strike', 'close']].values:
+                    iv, diff = func(s, k, r, t, fee, cp_sign, g)
+
+                    yield *by_item, k, fee, iv, np.round(diff, 4)
 
 
 def load_lastdel_multi(path: (str, list)):
@@ -163,7 +156,6 @@ def load_lastdel_multi(path: (str, list)):
 
 
 if __name__ == '__main__':
-    #
     node = BaseSingleFactorTableNode('clickhouse://default:Imsn0wfree@47.104.186.157:8123/system')
 
     sql = "select * from quote.view_quote_mo where trade_date>='2020-01-01'"
@@ -176,7 +168,7 @@ if __name__ == '__main__':
 
     contract_list = moqqm._raw['contract_code'].unique().tolist()
 
-    lastdel_multi = load_lastdel_multi('lastdel_multi.xlsx')
+    lastdel_multi = load_lastdel_multi('lastdel_multi.xlsx').set_index('委托合约')
 
     # lastdel_multi = get_info_last_delivery_multi(contract_list, wh)
     # lastdel_multi.to_excel('lastdel_multi.xlsx')

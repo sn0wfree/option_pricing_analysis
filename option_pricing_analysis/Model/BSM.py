@@ -2,27 +2,35 @@
 
 import numpy as np
 import scipy.stats as sps
-from scipy.optimize import brentq, newton
-from scipy.stats import norm
+from CodersWheel.QuickTool.timer import timer
+from scipy.optimize import brentq
 
 
-def timer(func):
-    from functools import wraps
-    import time
+class OptionBaseTools(object):
+    @staticmethod
+    def alter_dividends(s, g, r, t, dividends):
+        if dividends != 'continuous':
+            d = g
+            s = s - d * np.exp(-r * t)
+            g = 0
+        else:
+            pass
+        return s, g
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.time()
-        res = func(*args, **kwargs)
+    @staticmethod
+    def detect_cp_sign(cp_sign):
+        if cp_sign in ('Call', 'call', 'c', 'C'):
+            cp_sign = 1
+        elif cp_sign in ('p', 'P', 'Put', 'put'):
+            cp_sign = -1
+        elif cp_sign in (-1, 1):
+            pass
+        else:
+            raise ValueError('cp_sign (%s) is Unknown input' % cp_sign)
+        return cp_sign
 
-        end = time.time()
-        print(func.__name__ + ' spend: ' + str(end - start))
-        return res
 
-    return wrapper
-
-
-class BlackScholesOptionPricingModel(object):
+class BlackScholesOptionPricingModel(OptionBaseTools):
     """
     this class is to calculate the option fee by Black-Scholes Model
     """
@@ -41,23 +49,17 @@ class BlackScholesOptionPricingModel(object):
         """
         pass
 
-        if dividends != 'continuous':
-            d = g
-            s = s - d * np.exp(-r * t)
-            g = 0
-        else:
-            pass
+        s, g = self.alter_dividends(s, g, r, t, dividends)
         self.variables = s, k, r, t, sigma, cp_sign, g, dividends
 
     @staticmethod
-    def d(s, k, r, t, sigma, g, dividends):
+    def cal_d(s, k, r, t, sigma, g, dividends):
         if dividends != 'continuous':
             d = g
             s = s - d * np.exp(-r * t)
             g = 0
         else:
             pass
-        # variables = s, k, r, t, sigma, cp_sign, g, dividends
 
         d1 = (np.log(s / k) + ((r - g) + 0.5 * (sigma ** 2)) * t) / np.float64(sigma * np.sqrt(t))
 
@@ -83,56 +85,20 @@ class BlackScholesOptionPricingModel(object):
         :param dividends: dividend method
         :return: optionfee
         """
-        d1, d2 = cls.d(s, k, r, t, sigma, g, dividends)
+        d1, d2 = cls.cal_d(s, k, r, t, sigma, g, dividends)
         Nd1, Nd2 = cls.Nd(cp_sign, d1, d2)
-        optionfee = cp_sign * s * np.exp(-g * t) * Nd1 - cp_sign * k * np.exp(-r * t) * Nd2
-        return optionfee
 
-    # def Cal(self, Combine=True):
-    #     s, k, r, t, sigma, cp_sign, g, dividends = self.variables
-    #     d1, d2 = self.d(s, k, r, t, sigma, cp_sign, g, dividends)
-    #     if Combine:
-    #         self.optionfee = cp_sign * s * np.exp(-g * t) * sps.norm.cdf(
-    #             cp_sign * d1) - cp_sign * k * np.exp(-r * t) * sps.norm.cdf(cp_sign * d2)
-    #     else:
-    #         if cp_sign == 1:
-    #
-    #             self.optionfee = s * \
-    #                              np.exp(-g * t) * sps.norm.cdf(d1) - k * \
-    #                              np.exp(-r * t) * sps.norm.cdf(d2)
-    #         elif cp_sign == -1:
-    #
-    #             self.optionfee = -s * \
-    #                              np.exp(-g * t) * sps.norm.cdf(-d1) + k * \
-    #                              np.exp(-r * t) * sps.norm.cdf(-d2)
-    #     return self.optionfee
+        fee = cp_sign * s * np.exp(-g * t) * Nd1 - cp_sign * k * np.exp(-r * t) * Nd2
+
+        return fee
 
 
 class OptionPricing(object):
     __slots__ = ()
 
-    @classmethod
-    def BSPricingSimple(cls, S, K, r, T, sigma, cp_sign, *args, **kwargs):
-        if cp_sign == 1:
-            return cls.BSPricingSimpleCall(S, K, r, T, sigma)
-        else:
-            return cls.BSPricingSimplePut(S, K, r, T, sigma)
-
     @staticmethod
-    def BSPricingSimpleCall(S, K, r, T, sigma):
-        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-        d2 = d1 - sigma * np.sqrt(T)
-        return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-
-    @staticmethod
-    def BSPricingSimplePut(S, K, r, T, sigma):
-        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-        d2 = d1 - sigma * np.sqrt(T)
-        put_price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-        return put_price
-
-    @staticmethod
-    def BSPricing(s, k, r, t, sigma, cp_sign, g=0, dividends='continuous', self_cal=False, IV_LOWER_BOUND=1e-8):
+    # @timer
+    def BSPricing(s, k, r, t, sigma, cp_sign, g=0, dividends='continuous', self_cal=True, IV_LOWER_BOUND=1e-8):
         """
 
         Black-Scholes Option Pricing Model
@@ -163,23 +129,19 @@ class OptionPricing(object):
         """
 
         # if cp_sign in ('Call', 'call', 'c', 'C', 'p', 'P', 'Put', 'put'):
-        if cp_sign in ('Call', 'call', 'c', 'C'):
-            cp_sign = 1
-        elif cp_sign in ('p', 'P', 'Put', 'put'):
-            cp_sign = -1
-        elif cp_sign in (-1, 1):
-            pass
-        else:
-            raise ValueError('cp_sign (%s) is Unknown input' % cp_sign)
+        # if cp_sign in ('Call', 'call', 'c', 'C'):
+        #     cp_sign = 1
+        # elif cp_sign in ('p', 'P', 'Put', 'put'):
+        #     cp_sign = -1
+        # elif cp_sign in (-1, 1):
+        #     pass
+        # else:
+        #     raise ValueError('cp_sign (%s) is Unknown input' % cp_sign)
+
+        cp_sign = OptionBaseTools.detect_cp_sign(cp_sign)
 
         if self_cal:
-            if dividends != 'continuous':
-                d = g
-                s = s - d * np.exp(-r * t)
-                g = 0
-                # s= S − Dte − rT。
-            else:
-                pass
+            s, g = OptionBaseTools.alter_dividends(s, g, r, t, dividends)
 
             if sigma > IV_LOWER_BOUND:
                 d1 = (np.log(s / k) + ((r - g) + 0.5 * (sigma) ** 2)
@@ -195,7 +157,8 @@ class OptionPricing(object):
         return optionfee
 
     @staticmethod
-    def MCPricing(s, k, r, t, sigma, cp_sign, g, dividends='continuous', iteration=1000000):
+    # @timer
+    def MCPricing(s, k, r, t, sigma, cp_sign, g, dividends='continuous', iteration=1000000, **kwargs):
         """
         Monte Carlo Pricing Model
         ----------------------------------
@@ -210,61 +173,29 @@ class OptionPricing(object):
         :param iteration:  iteration
         :return: option fee
         """
-        # Monte Carlo Pricing Model
-        # ----------------------------------
-        # s: Underlying Assets Price
-        # k: Strike Price
-        # r: risk free interest rate
-        # T: available time
-        # sigma: square root of annual variance
-        # cp: call or put fee
-        # g: dividend yield
-        # dividends: continuous
+        # import time
 
-        call_sign = ['Call', 'call', 'c', 'C', 1]
-        put_sign = ['p', 'P', 'Put', 'put', -1]
+        cp_sign = OptionBaseTools.detect_cp_sign(cp_sign)
+        # func = lambda x: max(cp_sign * (x - k), 0)
+        s, g = OptionBaseTools.alter_dividends(s, g, r, t, dividends)
 
-        if cp_sign in call_sign + put_sign:
-            if cp_sign in call_sign:
-                cp_sign = 1
-            elif cp_sign in put_sign:
-                cp_sign = -1
-        else:
-            raise ValueError('cp_sign (%s) is Unknown input' % cp_sign)
-
-        if dividends != 'continuous':
-            d = g
-            s = s - d * np.exp(-r * t)
-            g = 0
-            # s= S − Dte − rT。
-        else:
-            pass
         zt = np.random.normal(0, 1, iteration)
         st = s * np.exp((r - g - .5 * sigma ** 2) * t + sigma * t ** .5 * zt)
-        p = []
-        for St in st:
-            p.append(max(cp_sign * (St - k), 0))
-        return np.average(p) * np.exp(-r * t)
+        # t1 = time.time()
+        _p = np.maximum((st - k) * cp_sign, 0)
+        # t2 = time.time()
+        # p = [func(x) for x in st]
+        # t3 = time.time()
+
+        # print(t2 - t1, t3 - t2)
+
+        return np.average(_p) * np.exp(-r * t)
 
 
 class ImpliedVolatility(object):
 
     # http://www.codeandfinance.com/finding-implied-vol.html
     # Newton's method
-    # def implied_volatility_newton(option_market_price, pricing_f, S, K, r, T):
-    #    MAX_ITERATIONS = 100
-    #    PRECISION = 1e-5
-    #    sigma = 0.5
-    #    for i in range(0, MAX_ITERATIONS):
-    #        price = pricing_f(S, K, r, sigma, T)
-    #        diff = option_market_price - price
-    #        #print(i, sigma, diff)
-    #        if abs(diff) < PRECISION:
-    #            return sigma
-    #        #x1 = x0 + f(x0) / f'(x0)
-    #        sigma = sigma + diff / Vega(S, K, r, sigma, T)
-    #    # value wasn't found, return best guess so far
-    #    return sigma
 
     # Calculate the Black-Scholes implied volatility using the Brent method (for reference).
     # Return float, a zero of f between a and b.
@@ -275,34 +206,23 @@ class ImpliedVolatility(object):
         self.pricing_f = pricing_f
         self.method = method
 
-    def implied_volatility_smart(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
-                                 IV_LOWER_BOUND=1e-8, method=None, **kwargs):
+    def loss_func(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
+                  method='BSPricing', **kwargs):
 
-        try:
-            return self.implied_volatility_brent(S, K, r, T, option_market_price, cp_sign, g, dividends=dividends,
-                                                 IV_LOWER_BOUND=IV_LOWER_BOUND, method=method, **kwargs)
-        except Exception as e:
-
-            return self.implied_volatility_newton(S, K, r, T, option_market_price, cp_sign, g,
-                                                  dividends=dividends, IV_LOWER_BOUND=IV_LOWER_BOUND, method=method,
-                                                  **kwargs)
-
-    def implied_volatility_newton(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
-                                  IV_LOWER_BOUND=1e-8, method=None, **kwargs):
         if method is None:
             callback = getattr(self.pricing_f, self.method)
         else:
             callback = getattr(self.pricing_f, method)
 
-        func = lambda sigma: callback(S, K, r, T, sigma, cp_sign, g,
-                                      dividends=dividends, **kwargs) - option_market_price
+        def _callback_(sigma):
 
-        implied_vol = newton(func, x0=0.02, )
-        return max(implied_vol, IV_LOWER_BOUND),func(implied_vol)
+            return callback(S, K, r, T, sigma, cp_sign, g, dividends=dividends, **kwargs) - option_market_price
+
+        return _callback_
 
     @timer
-    def implied_volatility_brent(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
-                                 IV_LOWER_BOUND=1e-8, method=None, **kwargs):
+    def iv_brent(self, S, K, r, T, option_market_price, cp_sign, g, dividends='continuous',
+                 IV_LOWER_BOUND=1e-8, method='BSPricing', **kwargs):
         """
 
 
@@ -318,127 +238,127 @@ class ImpliedVolatility(object):
         :param IV_LOWER_BOUND:
         :return:
         """
-        max_iter = 20
-        if method is None:
-            callback = getattr(self.pricing_f, self.method)
-        else:
-            callback = getattr(self.pricing_f, method)
 
-        func = lambda sigma: callback(S, K, r, T, sigma, cp_sign, g,
-                                      dividends=dividends, **kwargs) - option_market_price
-        a, b = IV_LOWER_BOUND, 1
+        loss = self.loss_func(S, K, r, T, option_market_price, cp_sign, g, dividends=dividends, method=method, )
+        # other_loss = self.loss_func(S, K, r, T, option_market_price, cp_sign, g, dividends=dividends,
+        #                             method=alter_method, )
+        max_iter = 2000
+        a, b = 0.01, 1
 
-        fa = func(a)
-        fb = func(b)
+        fa = loss(a)
+        fb = loss(b)
         iter_count = 0
         while fa * fb > 0 and iter_count < max_iter:
             if abs(fa) < abs(fb):
-                a /= 20  # Decrease a if f(a) is closer to zero
+                a /= 2  # Decrease a if f(a) is closer to zero
             else:
-                b *= 1.5  # Increase b if f(b) is closer to zero
-            fa = func(a, )
-            fb = func(b, )
+                b *= 2  # Increase b if f(b) is closer to zero
+                b = min(100, b)  # 防止b过大
+            fa = loss(a, )
+            fb = loss(b, )
             iter_count += 1
 
         if fa * fb < 0:
-            v = brentq(func, a, b)
-            ret_iv = max(v, IV_LOWER_BOUND)
-
-            diff = func(ret_iv, )
+            ret_iv = brentq(loss, a, b)
+            # ret_iv = max(v, IV_LOWER_BOUND)
+            diff = loss(ret_iv, )
             return ret_iv, diff
         else:
-            diff = func(IV_LOWER_BOUND, )
+
+            a = max(a, IV_LOWER_BOUND)
+            # ret_iv = brentq(other_loss, a, b)
+            diff = loss(a, )
             return IV_LOWER_BOUND, diff
 
-    def Implied_volatility_Call(self, S, K, r, T, market_option_price, g=0, dividends='continuous'):
-        return self.implied_volatility_brent(market_option_price, S, K, r, T, cp_sign='call', g=g, dividends=dividends)
-
-    def Implied_volatility_Put(self, S, K, r, T, market_option_price, g=0, dividends='continuous'):
-        return self.implied_volatility_brent(market_option_price, S, K, r, T, cp_sign='put', g=g, dividends=dividends)
-
-    def ImpliedVolatility(self, S, K, r, T, market_option_price, cp_sign, g=0, dividends='continuous'):
-        return self.implied_volatility_brent(market_option_price, S, K, r, T, cp_sign, g=g, dividends=dividends)
-
-    def ImpliedVolatility_OlD(self, s, k, r, t, cp, cp_sign, g, IV_LOWER_BOUND=1e-8, func=OptionPricing().BSPricing):
-        """
-        this function is calculate the implied volatility of one option self.
-        :param s:  Underlying Assets Price
-        :param k:  Strike Price
-        :param r:  risk free interest rate
-        :param t:  available time
-        :param cp:  call or put fee
-        :param cp_sign: 1 if call else -1 if put
-        :param g: dividend rate
-        :param IV_LOWER_BOUND: 1e-8
-        :param func:
-        :return:
-        """
-        # this function is calculate the implied volatility of one option self.
-        # ---------------------------------
-        # s: Underlying Assets Price
-        # k:Strike Price
-        # r:risk free interest rate
-        # T: available time
-        # sigma:square root of annual variance
-        # cp: call or put fee
-        # g: dividend yield
-        # dividends:continuous
-
-        # func=BSPricing
-        sigma = 0.3  # initial volatility
-        mktprice = cp
-
-        lower = 1e-10  # initial low Bound
-        upper = 1  # initial Upper Bound
-        count = 0  # initial counter
-        last = 0
-        C = func(s, k, r, t, sigma, cp_sign, g)
-
-        # sigma = 0.3 # initial volatility
-
-        while abs(C - mktprice) > IV_LOWER_BOUND:
-            C = func(s, k, r, t, sigma, cp_sign, g)
-            last = C
-            if C - mktprice > 0:
-                # print 'large'
-                upper = sigma
-                sigma = (sigma + lower) / 2  # lower
-            else:
-                # print 'small'
-                lower = sigma
-                sigma = (sigma + upper) / 2  # higher
-            if upper - lower < IV_LOWER_BOUND:
-                count += 1
-
-                """if 500>count:
-                        if sigma >=1 and C*1.5>mktprice:
-                            pass
-                        elif sigma<=0 and C<mktprice*1.5:pass
-                    """
-                if 10000 > count:
-                    pass
-                else:
-                    if upper <= IV_LOWER_BOUND:
-                        sigma = 0
-                    elif lower >= 1 - IV_LOWER_BOUND:
-                        sigma = 1
-                    else:
-                        sigma = (upper + lower) / 2
-                    break
-
-        if sigma >= 1:
-            status = 'Market Price own Invalid Price (abnormal High)'
-        elif sigma <= 0:
-            status = 'Market Price own Invalid Price (abnormal Low)'
-        else:
-            status = "Normal"
-        # sigma,status,C, mktprice
-        # implied volatility , status for testing the IV whether has
-        return sigma, status, C / mktprice  # implied volatility
+    # def Implied_volatility_Call(self, S, K, r, T, market_option_price, g=0, dividends='continuous'):
+    #     return self.iv_brent(S, K, r, T, market_option_price, cp_sign='call', g=g, dividends=dividends)
+    #
+    # def Implied_volatility_Put(self, S, K, r, T, market_option_price, g=0, dividends='continuous'):
+    #     return self.iv_brent(S, K, r, T, market_option_price, cp_sign='put', g=g, dividends=dividends)
+    #
+    # def ImpliedVolatility(self, S, K, r, T, market_option_price, cp_sign, g=0, dividends='continuous'):
+    #     return self.iv_brent(S, K, r, T, market_option_price, cp_sign, g=g, dividends=dividends)
+    #
+    # def ImpliedVolatility_OlD(self, s, k, r, t, cp, cp_sign, g, IV_LOWER_BOUND=1e-8, func=OptionPricing().BSPricing):
+    #     """
+    #     this function is calculate the implied volatility of one option self.
+    #     :param s:  Underlying Assets Price
+    #     :param k:  Strike Price
+    #     :param r:  risk free interest rate
+    #     :param t:  available time
+    #     :param cp:  call or put fee
+    #     :param cp_sign: 1 if call else -1 if put
+    #     :param g: dividend rate
+    #     :param IV_LOWER_BOUND: 1e-8
+    #     :param func:
+    #     :return:
+    #     """
+    #     # this function is calculate the implied volatility of one option self.
+    #     # ---------------------------------
+    #     # s: Underlying Assets Price
+    #     # k:Strike Price
+    #     # r:risk free interest rate
+    #     # T: available time
+    #     # sigma:square root of annual variance
+    #     # cp: call or put fee
+    #     # g: dividend yield
+    #     # dividends:continuous
+    #
+    #     # func=BSPricing
+    #     sigma = 0.3  # initial volatility
+    #     mktprice = cp
+    #
+    #     lower = 1e-10  # initial low Bound
+    #     upper = 1  # initial Upper Bound
+    #     count = 0  # initial counter
+    #     last = 0
+    #     C = func(s, k, r, t, sigma, cp_sign, g)
+    #
+    #     # sigma = 0.3 # initial volatility
+    #
+    #     while abs(C - mktprice) > IV_LOWER_BOUND:
+    #         C = func(s, k, r, t, sigma, cp_sign, g)
+    #         last = C
+    #         if C - mktprice > 0:
+    #             # print 'large'
+    #             upper = sigma
+    #             sigma = (sigma + lower) / 2  # lower
+    #         else:
+    #             # print 'small'
+    #             lower = sigma
+    #             sigma = (sigma + upper) / 2  # higher
+    #         if upper - lower < IV_LOWER_BOUND:
+    #             count += 1
+    #
+    #             """if 500>count:
+    #                     if sigma >=1 and C*1.5>mktprice:
+    #                         pass
+    #                     elif sigma<=0 and C<mktprice*1.5:pass
+    #                 """
+    #             if 10000 > count:
+    #                 pass
+    #             else:
+    #                 if upper <= IV_LOWER_BOUND:
+    #                     sigma = 0
+    #                 elif lower >= 1 - IV_LOWER_BOUND:
+    #                     sigma = 1
+    #                 else:
+    #                     sigma = (upper + lower) / 2
+    #                 break
+    #
+    #     if sigma >= 1:
+    #         status = 'Market Price own Invalid Price (abnormal High)'
+    #     elif sigma <= 0:
+    #         status = 'Market Price own Invalid Price (abnormal Low)'
+    #     else:
+    #         status = "Normal"
+    #     # sigma,status,C, mktprice
+    #     # implied volatility , status for testing the IV whether has
+    #     return sigma, status, C / mktprice  # implied volatility
 
 
 if __name__ == '__main__':
-    iv_func = ImpliedVolatility(pricing_f=OptionPricing, method='MCPricing').implied_volatility_brent
+    iv_func = ImpliedVolatility(pricing_f=OptionPricing, method='MCPricing').iv_brent
     s, x, r, t, cp_sign, g = 5473.55, 4950, 0.015, 28 / 250, -1, 0
 
     cp_fee = 51.4
@@ -449,8 +369,8 @@ if __name__ == '__main__':
     # print cp,sigma,CalImpliedVolatility(s,x,r,t,cp,cp_sign,g)
     print(cp_fee, iv)
 
-    # print('MC')
-    # iv = iv_func(s, x, r, t, cp_free, cp_sign, g, method='MCPricing')
+    print('MC')
+    iv = iv_func(s, x, r, t, cp_fee, cp_sign, g, method='MCPricing')
     # # iv_old = ImpliedVolatility(pricing_f=op).ImpliedVolatility_OlD(s, x, r, t, cp, cp_sign, g)
     # # print cp,sigma,CalImpliedVolatility(s,x,r,t,cp,cp_sign,g)
-    # print(cp_free, iv)
+    print(cp_fee, iv)
