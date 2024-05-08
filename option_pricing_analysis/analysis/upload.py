@@ -164,7 +164,7 @@ class UploadDailyInfo(CreateTableTools):
             d['ValueName'] = name
             d['PositionDirection'] = position_direction
             if reduce:
-                d = d[d.index > updated_dt_dict['parsed_data']]
+                d = d[d['TradeDate'] > pd.to_datetime(updated_dt_dict['parsed_data'])]
                 if d.empty:
                     continue
             # d['TradeDate'] = pd.to_datetime(d['TradeDate']).dt.strftime("%Y-%m-%d")
@@ -302,7 +302,7 @@ if __name__ == '__main__':
     mappings_link = config['mappings_link']
 
     UDI = UploadDailyInfo(file_name)
-    UDI.upload_all(node, mappings_link=mappings_link, sheet_key_word='输出', traders=traders, db=None, reduce=False)
+    UDI.upload_all(node, mappings_link=mappings_link, sheet_key_word='输出', traders=traders, db=None, reduce=True)
 
     print(1)
     pass

@@ -253,7 +253,7 @@ class ImpliedVolatility(object):
                 a /= 2  # Decrease a if f(a) is closer to zero
             else:
                 b *= 2  # Increase b if f(b) is closer to zero
-                b = min(100, b)  # 防止b过大
+                b = min(1, b)  # 防止b过大
             fa = loss(a, )
             fb = loss(b, )
             iter_count += 1

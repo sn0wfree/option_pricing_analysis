@@ -567,8 +567,6 @@ class DerivativeSummary(ReportAnalyst):
 
 
 if __name__ == '__main__':
-    from upload import UploadDailyInfo
-
 
 
     config = Configs()
@@ -581,16 +579,17 @@ if __name__ == '__main__':
                                                                                          "买开": 1, "买平": -1,
                                                                                          "买平今": -1, })
 
-    file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v3.xlsx')))
-
-    # result_dict = pd.read_excel(file_name, sheet_name=None)
-    # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
-    # sql_dict = config['sql_dict']
-    # traders = config['output_config']['汇总']
-
-    node = BaseSingleFactorTableNode(config['src'])
-    UDI = UploadDailyInfo(file_name)
-    UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
-                   traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
+    # from upload import UploadDailyInfo
+    # file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v3.xlsx')))
+    #
+    # # result_dict = pd.read_excel(file_name, sheet_name=None)
+    # # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
+    # # sql_dict = config['sql_dict']
+    # # traders = config['output_config']['汇总']
+    #
+    # node = BaseSingleFactorTableNode(config['src'])
+    # UDI = UploadDailyInfo(file_name)
+    # UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
+    #                traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
 
     pass
