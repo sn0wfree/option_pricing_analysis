@@ -36,6 +36,8 @@ def create_summary_output_file_path(output_path='./'):
     _path = os.path.join(output_path, output_name_format)
     return _path
 
+def check_ls(data_dict, keyword):
+    return {key: df for key, df in data_dict.items() if keyword in key and isinstance(df, pd.DataFrame)}
 
 class DerivativeSummary(ReportAnalyst):
     @staticmethod
@@ -387,6 +389,16 @@ class DerivativeSummary(ReportAnalyst):
             _df.index = pd.MultiIndex.from_tuples(idx_list)
             yield _df
 
+    @staticmethod
+    def latest_contract_ls(contract_summary_dict):
+        res_ls = []
+        for key, df in contract_summary_dict.items():
+            contract_name, direction = key[:2], key[2:4]
+            last_cum_res = df['累计净损益(右轴)'].iloc[-1]
+            res_ls.append([contract_name, direction, last_cum_res])
+        contract_last_cum = pd.DataFrame(res_ls, columns=['合约名称', '交易方向', '累计净损益']).pivot_table(index='合约名称',columns='交易方向',values='累计净损益')
+        return contract_last_cum
+
     def output_v2(self, info_dict, lastdel_multi, output_config={'汇总': ['wj', 'gr', 'll'],
                                                                  '期货多头': ['wj', 'gr'],
                                                                  '期货对冲': ['IM'],
@@ -409,8 +421,9 @@ class DerivativeSummary(ReportAnalyst):
         person_holder, merged_summary_dict, contract_summary_dict = PR.group_by_summary(
             info_dict, return_data=True, store_2_excel=False)
 
-        target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价', '当日收益', '当日收益率', '累计收益',
-                       '累计收益率', '持仓名义市值', '平仓价值', '行权价值', '近一周收益', '近一周收益率',
+        target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价', '当日收益', '当日收益率',
+                       '持仓名义市值', '平仓价值', '行权价值',
+                       '累计收益','累计收益率','近一周收益', '近一周收益率',
                        '近一月收益', '近一月收益率', ]
 
         year_cols = []
@@ -424,6 +437,9 @@ class DerivativeSummary(ReportAnalyst):
             self.process_person_by_year(person_holder, person_list=output_config['汇总']), axis=1)
         person_by_year_summary['累计盈亏'] = person_by_year_summary.sum(axis=1)
         person_by_year_summary.index.name = '统计维度'
+
+        #分合约多空 要输出contract_by_ls
+        contract_by_ls_summary = self.latest_contract_ls(contract_summary_dict)
 
         # 期货多头：分人分年度分品种
         # person_cum_sub 要输出的
@@ -486,7 +502,7 @@ class DerivativeSummary(ReportAnalyst):
             target_cols + sorted(set(year_cols))]
         holding_contracts_summary_merged_sorted.index.names = ['交易员', '统计维度']
 
-        return person_by_year_summary, person_cum_sub, comm_cum_sub, holding_contracts_summary_merged_sorted
+        return person_by_year_summary, person_cum_sub, comm_cum_sub, holding_contracts_summary_merged_sorted,contract_by_ls_summary
 
     def auto_run(self, output_config,
                  quote_start_with='2022-06-04',
@@ -514,7 +530,7 @@ class DerivativeSummary(ReportAnalyst):
                                                                                                return_data=True,
                                                                                                store_2_excel=False)
 
-        person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted = self.output_v2(
+        person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted,contract_by_ls_summary = self.output_v2(
             info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
 
         store_path = self.create_daily_summary_file_path(output_path='./', version='v3')
@@ -524,6 +540,7 @@ class DerivativeSummary(ReportAnalyst):
             person_cum_sub.to_excel(f, 'person_cum_sub')
             commodity_cum_sub.to_excel(f, 'commodity_cum_sub')
             holding_summary_merged_sorted.to_excel(f, 'holding_summary_merged_sorted')
+            contract_by_ls_summary.to_excel(f, 'contract_by_ls_summary')
 
             for name, data in sorted(person_holder_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
@@ -593,3 +610,7 @@ if __name__ == '__main__':
     #                traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
 
     pass
+
+#   1、浮动盈亏+已实现盈亏（拆分累计净损益）
+#   2、保证金占用
+#   3、品种收益柱形图，多空、持仓占比饼图
