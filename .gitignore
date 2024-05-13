@@ -132,6 +132,6 @@ dmypy.json
 *.xlsx
 *.cache
 *.sqlite
-/option_pricing_analysis/analysis/config.yml
+/option_pricing_analysis/config.yml
 .idea/option_pricing.iml
 /.idea

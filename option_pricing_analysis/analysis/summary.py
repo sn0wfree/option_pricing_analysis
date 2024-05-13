@@ -406,7 +406,7 @@ class DerivativeSummary(ReportAnalyst):
                   method='FIFO'
                   ):
 
-        person_holder, merged_summary_dict, contract_summary_dict = PR.group_by_summary(
+        person_holder, merged_summary_dict, contract_summary_dict = self.group_by_summary(
             info_dict, return_data=True, store_2_excel=False)
 
         target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价', '当日收益', '当日收益率', '累计收益',
@@ -432,7 +432,7 @@ class DerivativeSummary(ReportAnalyst):
                                                                           person_list=output_config['汇总'],
                                                                           return_cum=True)
 
-        person_contract_summary = person_contract_summary_all.loc[(output_config['期货多头'], slice(None)), :]
+        # person_contract_summary = person_contract_summary_all.loc[(output_config['期货多头'], slice(None)), :]
         person_cum_sub = person_cum_sub_all.loc[output_config['期货多头'], :]
         person_cum_sub.index.name = '交易员'
 
@@ -449,7 +449,7 @@ class DerivativeSummary(ReportAnalyst):
         comm_cum_sub.index.name = '品种'
 
         # 分人分合约统计
-        contracts = PR.reduced_contracts()
+        contracts = self.reduced_contracts()
         c, p, s, comm = list(
             zip(*list(self.contract_link_person(contracts, contract_2_person_rule=self.contract_2_person_rule))))
         c2p = dict(zip(c, p))
@@ -579,17 +579,17 @@ if __name__ == '__main__':
                                                                                          "买开": 1, "买平": -1,
                                                                                          "买平今": -1, })
 
-    # from upload import UploadDailyInfo
-    # file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v3.xlsx')))
-    #
-    # # result_dict = pd.read_excel(file_name, sheet_name=None)
-    # # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
-    # # sql_dict = config['sql_dict']
-    # # traders = config['output_config']['汇总']
-    #
-    # node = BaseSingleFactorTableNode(config['src'])
-    # UDI = UploadDailyInfo(file_name)
-    # UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
-    #                traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
+    from upload import UploadDailyInfo
+    file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v3.xlsx')))
+
+    # result_dict = pd.read_excel(file_name, sheet_name=None)
+    # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
+    # sql_dict = config['sql_dict']
+    # traders = config['output_config']['汇总']
+
+    node = BaseSingleFactorTableNode(config['src'])
+    UDI = UploadDailyInfo(file_name)
+    UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
+                   traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
 
     pass

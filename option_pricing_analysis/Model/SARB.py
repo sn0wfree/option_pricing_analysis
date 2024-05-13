@@ -2,12 +2,10 @@
 import warnings
 
 import QuantLib as ql
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.interpolate import interp1d
-from scipy.optimize import least_squares, minimize
+from scipy.optimize import minimize
 
 warnings.filterwarnings("ignore")
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
@@ -19,23 +17,19 @@ pd.set_option('display.max_rows', None)
 ref:  https://zhuanlan.zhihu.com/p/684313868
 
 """
+ZERO = 1e-8
+BOUNDS = ((0 + ZERO, np.inf),
+          (0 + ZERO, 1 - ZERO),
+          (0 + ZERO, np.inf),
+          (0 + ZERO, 1 - ZERO))
 
-
-def timeit(num):
-    def sub_timeit(func):
-        import time
-        def _timeit(*args, **kwargs):
-            start = time.time()
-
-            for _ in range(num):
-                res = func(*args, **kwargs)
-            end = time.time()
-            print(f'run {func.__name__} {num} times:', end - start)
-            return res
-
-        return _timeit
-
-    return sub_timeit
+CONS = ({'type': 'ineq', 'fun': lambda x: x[0] - ZERO},
+        {'type': 'ineq', 'fun': lambda x: 0.9995 - x[1] - ZERO},
+        {'type': 'ineq', 'fun': lambda x: x[1] - ZERO},
+        {'type': 'ineq', 'fun': lambda x: x[2] - ZERO},
+        {'type': 'ineq', 'fun': lambda x: x[3] - ZERO},
+        {'type': 'ineq', 'fun': lambda x: 0.9995 - x[3] - ZERO},
+        )
 
 
 def sabr(F, alpha, beta, v, rho, K, T):
@@ -75,7 +69,7 @@ def sabr(F, alpha, beta, v, rho, K, T):
     return bs_sigma
 
 
-class SABTBase(object):
+class SABRCore(object):
     @staticmethod
     def sabr_obloj_opt(F, alpha, beta, v, rho, K, T):
 
@@ -209,141 +203,82 @@ class SABTBase(object):
         return bs_sigma
 
 
-class SABR_obloj(SABTBase):
-    def __init__(self, F, K, T, imp_vol, opt_paras: dict):
+class SABR_obloj(SABRCore):
+    def __init__(self, K, F, T, imp_vol, opt_paras: dict = {"alpha": 0.0005, "beta": 1, "rho": -0.005, "v": 0.01}):
         self.F = F
-        self.K = K
-        self.x = np.log(K / F)  # 远期在值程度
+        self.K = np.array(K)
+        self.x = np.log(self.K / F)  # 远期在值程度
         self.T = T  # 到期时间
-        self.imp_vol = imp_vol  # 隐含波动率
+        self.imp_vol = np.array(imp_vol)  # 隐含波动率
 
         # opt_paras：优化的alpha,rho,v参数，需要字典形式如，{"alpha":0.0005,"beta":1,"rho":-0.005,"v":0.01},这里加上beta作为可变的
         self.opt_paras = opt_paras
 
     # 实现定义好SABR的函数,就是前面定义过的函数,参数保留要优化的alpha,v,rho，方便后面代码实现
-    def sabr_obloj_func(self, K, alpha, v, rho):
-
-        F, beta, T = self.F, self.opt_paras["beta"], self.T
+    def sabr_obloj_func(self, K, alpha, beta, v, rho):
+        F, T = self.F, self.T
 
         return self.sabr_obloj_opt(F, alpha, beta, v, rho, K, T)
 
     def transform(self, y, l, u):
         return 0.5 * ((u + l) + (u - l) * np.tanh(y))
 
-    def obj_func(self, x):
-        y1, y2, y3 = x
-
+    def transform_x(self, x):
+        y1, y2, y3, y4 = x
         # transform后才是真正的alpha,v,rho
         # alpha 初始波动率
         # rho 相关系数
         # v 波动率的波动率
-        alpha, v, rho = self.transform(y1, 0, 1), self.transform(y2, 0, 10), self.transform(y3, -1, 1)
+        alpha, beta, v, rho = self.transform(y1, 0, 1), self.transform(y2, 0, 1), self.transform(y3, 0,
+                                                                                                 10), self.transform(y4,
+                                                                                                                     -1,
+                                                                                                                     1)
+        return alpha, beta, v, rho
 
-        err = self.sabr_obloj_func(self.K, alpha, v, rho) - self.imp_vol
+    def obj_func(self, x):
+        alpha, beta, v, rho = x
 
-        return err
+        err = self.sabr_obloj_func(self.K, alpha, beta, v, rho) - np.array(self.imp_vol)
 
-    def fit(self, x0=(-1, -2.5, 0.05)):
+        return (err ** 2).mean() ** 0.5
+
+    def fit(self, x0=(0.2, 1, 0.5, 0.05), cons=(
+            {'type': 'ineq', 'fun': lambda x: 0.99 - x[1]},
+            {'type': 'ineq', 'fun': lambda x: x[1]},
+            {'type': 'ineq', 'fun': lambda x: x[3]}
+    ),
+
+            bounds=None
+
+            ):
         # 初始值设定，这边就简单直接设定具体的值，可以根据transform的前后的值大概选取一个经验值
+        alpha, beta, v, rho = self.transform_x(x0)
 
-        result = least_squares(self.obj_func, x0, method="lm", verbose=0).x
+        result = minimize(self.obj_func, (alpha, beta, v, rho), bounds=bounds, constraints=cons)
 
-        alpha, v, rho = self.transform(result[0], 0, 1), self.transform(result[1], 0, 10), self.transform(result[2], -1,
-                                                                                                          1)
-        self.opt_paras["alpha"], self.opt_paras["v"], self.opt_paras["rho"] = alpha, v, rho
-        print(self.opt_paras)
+        # result = least_squares(self.obj_func, x0, method="lm", verbose=0).x
+
+        new_alpha, new_beta, new_v, new_rho = result.x  # self.transform_x()
+
+        self.opt_paras["alpha"], self.opt_paras["beta"], self.opt_paras["v"], self.opt_paras[
+            "rho"] = new_alpha, new_beta, new_v, new_rho
+
+        # print(self.opt_paras)
+
         return self.opt_paras
 
-    def predict(self, K, output="imp_vol"):
+    def predict(self, K=None, ):
+        K = self.K if K is None else K
 
-        sabr_imp_vol = self.sabr_obloj_func(K, self.opt_paras["alpha"], self.opt_paras["v"], self.opt_paras["rho"])
+        sabr_imp_vol = self.sabr_obloj_func(K, self.opt_paras["alpha"], self.opt_paras["beta"], self.opt_paras["v"],
+                                            self.opt_paras["rho"])
 
-        if output == "imp_vol":
-            return sabr_imp_vol
-        elif output == "w":
-            sabr_w = sabr_imp_vol ** 2 * self.T
-            # 一般输出的是隐含波动率，不过有时候输出总方差也会更方便
-            return sabr_w
-        else:
-            raise ValueError('unknown output!')
+        return sabr_imp_vol
 
 
-class sabr_surface(object):
-    def __init__(self, data, opt_method):
-        self.data = data
-        self.opt_method = opt_method
+class SABRModelBase(object):
+    __slot__ = ('_params', '_K', '_F', '_T', '_iv', '_result')
 
-    def get_fit_curve(self):
-        fit_result = []
-
-        # 循环每个月份，获得相应的拟合函数，返回一个包含svi实例的列表
-        for month in self.data["contract_month"].unique():
-            fit_option = self.data[(self.data["实虚值"] == "虚值") & (self.data["contract_month"] == month)]
-            F = fit_option["F"].values[0]
-            K = fit_option["exerciseprice"].values
-            T = fit_option["maturity"].values[0]
-            imp_vol = fit_option["market_imp_vol"].values
-            opt_paras = {"alpha": 0.05, "beta": 1, "rho": -0.05, "v": 0.01}  # 先大概指定个初始值，除beta外后续会变化为最优解
-            sabr = self.opt_method(F, K, T, imp_vol, opt_paras)
-            sabr.fit()
-            fit_result.append(sabr)
-
-        return fit_result
-
-    def plot_fit_curve(self):
-        fit_result = self.get_fit_curve()
-        fig, ax = plt.subplots(nrows=len(self.data["contract_month"].unique()), ncols=1, figsize=(8, 20))
-        for i, month in enumerate(self.data["contract_month"].unique()):
-            fit_option = self.data[(self.data["实虚值"] == "虚值") & (self.data["contract_month"] == month)]
-            sabr = fit_result[i]
-            fit_option["sabr_vol"] = sabr.predict(sabr.K, output="imp_vol")
-
-            ax[i].scatter(x=fit_option["exerciseprice"], y=fit_option["market_imp_vol"], marker='+', c="r")
-            ax[i].plot(fit_option["exerciseprice"], fit_option["sabr_vol"])
-            ax[i].set_title(month)
-
-    #  根据拟合的SABR函数，和平远期插值，生成100*100的隐含波动率网格
-    def gen_imp_vol_grid(self):
-        x = np.log(self.data["exerciseprice"] / self.data["F"])
-        t_array = np.linspace(self.data["maturity"].min(), self.data["maturity"].max(), 100)
-        x_array = np.linspace(x.min(), x.max(), 100)
-        t, x = np.meshgrid(t_array, x_array)
-
-        # 计算4个期限上的SABR拟合的总方差，并存储在100*4的矩阵里
-        fit_result = self.get_fit_curve()
-        w = np.zeros((100, len(fit_result)))
-
-        for m in range(len(fit_result)):
-            F_list = self.data["F"].unique()
-            K = F_list[m] * np.exp(x_array)  # SABR需要用行权价而不是在值程度，这里返回求解K
-            w[:, m] = fit_result[m].predict(K, output="w")
-
-        # 在x的维度上循环100次，每次循环在t维度上平远期插值计算
-        v = np.zeros_like(t)
-
-        for n in range(100):
-            f = interp1d(x=self.data["maturity"].unique(), y=w[n], kind="linear")
-            v[n] = np.sqrt(f(t[n]) / t[n])  # 返回的还是隐含波动率而不是总方差
-
-        return t, x, v
-
-    def plot_surface(self):
-        fig = plt.figure(figsize=(12, 7))
-        ax = plt.axes(projection='3d')
-        norm = mpl.colors.Normalize(vmin=0.1, vmax=0.2)
-        # 绘图主程序
-        t, x, v = self.gen_imp_vol_grid()
-        surf = ax.plot_surface(t, x, v, rstride=1, cstride=1,
-                               cmap=plt.cm.coolwarm, norm=norm, linewidth=0.5, antialiased=True)
-        # 设置坐标轴
-        ax.set_xlabel('maturity')
-        ax.set_ylabel('strike')
-        ax.set_zlabel('market_imp_vol')
-        ax.set_zlim((0.1, 0.25))
-        fig.colorbar(surf, shrink=0.25, aspect=5)
-
-
-class SABRfromQuantlib(object):
     def __init__(self, K, F, T, iv: (list, tuple)):
         self._K = K
         self._F = F
@@ -351,6 +286,7 @@ class SABRfromQuantlib(object):
         self._iv = iv
 
         self._params = None
+        self._result = None
 
     @property
     def params(self):
@@ -359,40 +295,123 @@ class SABRfromQuantlib(object):
     @params.setter
     def params(self, new_params):
         self._params = new_params
-        pass
 
     @staticmethod
-    def cal_vols(strikes, fwd, expiryTime, params):
-        vols = np.array([
-            ql.sabrVolatility(strike, fwd, expiryTime, *params)
-            for strike in strikes
-        ])
+    def cal_vols(strikes, fwd, expiryTime, params, func=ql.sabrVolatility):
+        vols = [func(strike, fwd, expiryTime, *params) for strike in strikes]
         return vols
 
+
+class SABRfromQuantlib(SABRModelBase):
+    __slot__ = ('_params', '_K', '_F', '_T', '_iv', '_result')
+
     @classmethod
-    def f(cls, strikes, fwd, expiryTime, marketVols, params):
-        print(params)
-        vols = cls.cal_vols(strikes, fwd, expiryTime, params)
-        return ((vols - np.array(marketVols)) ** 2).mean() ** .5
+    def _loss_func(cls, strikes, fwd, expiryTime, marketVols, params, func=ql.sabrVolatility):
+        vols = cls.cal_vols(strikes, fwd, expiryTime, params, func=func)
+        return ((np.array(vols) - np.array(marketVols)) ** 2).mean() ** .5
 
     def loss_func(self, params=(0.1, 0.99, 0.1, 0.1)):
         #  alpha,  beta,  nu,  rho
-        return self.f(self._K, self._F, self._T, self._iv, params)
+        return self._loss_func(self._K, self._F, self._T, self._iv, params, func=ql.sabrVolatility)
 
-    def fit(self, params=(0.1, 0.1, 0.1, 0.1), cons=(
+    def fit(self, params=(0.1, 0.1, 0.1, 0.1), bounds=None, cons=(
             {'type': 'ineq', 'fun': lambda x: 0.99 - x[1]},
             {'type': 'ineq', 'fun': lambda x: x[1]},
             {'type': 'ineq', 'fun': lambda x: x[3]}
     )):
-        result = minimize(self.loss_func, list(params), constraints=cons)
-        print(result.status)
+        result = minimize(self.loss_func, params, bounds=bounds, constraints=cons)
+        self._result = result
         self.params = result['x']
 
-        newVols = self.cal_vols(self._K, self._F, self._T, self.params)
-        return newVols
-
-    def predict(self, strikes, ):
+    def predict(self, strikes=None, ):
+        if strikes is None:
+            strikes = self._K
         return self.cal_vols(strikes, self._F, self._T, self.params)
+
+
+class MappingSABR(object):
+
+    @classmethod
+    def cal_sarbr_model(cls, data, bounds, cons, params=(0.2, 0.999950, 0.5, 0.5), n=10):
+        k, bs_iv, f, t = cls.create_kftiv(data, n=n)
+        sabr_mod = SABRfromQuantlib(k, f, t, bs_iv)
+        sabr_mod.fit(params=params, bounds=bounds, cons=cons)
+        return sabr_mod
+
+    @staticmethod
+    def chunk_data(K, f, n=200):
+        less_K = min(K[K <= f].sort_values().tail(n).values)
+        more_K = max(K[K >= f].sort_values().head(n).values)
+        return less_K, more_K
+
+    @staticmethod
+    def create_kftiv(data, n=1000):
+        K = data['k']
+        f = data['f'].unique().tolist()[0]
+        t = data['t'].unique().tolist()[0]
+
+        bs_iv_mask = ~(data['resid'].abs() > 0)
+        sub_data = data[bs_iv_mask]
+
+        k = sub_data['k']
+        bs_iv = sub_data['bs_iv']
+
+        return k, bs_iv, f, t
+
+    @classmethod
+    def _calibrating(cls, data, bounds, cons, params=(0.2, 0.99, 0.1, 0.1), n=10):
+        sabr_mod = cls.cal_sarbr_model(data, bounds, cons, params=params, n=n)
+
+        alpha, beta, nu, rho = sabr_mod.params
+
+        raw_sabr_iv = sabr_mod.predict(data['k'])
+        data['sabr_iv'] = raw_sabr_iv
+        data['sabr_alpha'] = alpha
+        data['sabr_beta'] = beta
+        data['sabr_nu'] = nu
+        data['sabr_rho'] = rho
+        data['sabr_loss'] = sabr_mod.loss_func(sabr_mod.params)
+
+        return data, sabr_mod.params
+
+    # ql.sabrVolatility(106, 120, 17/365, alpha, beta, nu, rho)
+
+    @classmethod
+    def calibrating(cls, tasks_df, last_params=(0.2, 0.995, 0.1, 0.1),
+                    cons=({'type': 'ineq', 'fun': lambda x: x[0]},),
+                    bounds=((0.001, 0.7),  # alpha,
+                            (0.01, 1),  # beta,
+                            (0.01, 10),  # nu,
+                            (0, 0.995))  # rho,
+                    ):
+        from functools import partial
+
+        func = partial(cls._calibrating, bounds=bounds, cons=cons, params=last_params, n=5)
+        h = []
+
+        for (dt, cp, ym), data in tasks_df.groupby(['dt', 'cp', 'ym']):
+            calibrated_data, params = func(data, )
+            h.append(calibrated_data)
+        res_bs_sabr_iv_df = pd.concat(h)
+        return res_bs_sabr_iv_df
+
+    @classmethod
+    def calibrating_boost(cls, tasks_df, last_params=(0.2, 0.995, 0.1, 0.1),
+                          cons=(),
+                          bounds=((0.001, 0.7),  # alpha,
+                                  (0.01, 1),  # beta,
+                                  (0.01, 10),  # nu,
+                                  (0, 0.995))):
+        from functools import partial
+        from CodersWheel.QuickTool.boost_up import boost_up
+
+        func = partial(cls._calibrating, bounds=bounds, cons=cons, params=last_params, n=5)
+
+        tasks = (data for (dt, cp, ym), data in tasks_df.groupby(['dt', 'cp', 'ym']))
+
+        h,params = list(zip(*boost_up(func, tasks, star=False)))
+        res_bs_sabr_iv_df = pd.concat(h)
+        return res_bs_sabr_iv_df
 
 
 if __name__ == '__main__':
@@ -400,10 +419,20 @@ if __name__ == '__main__':
     F = 120.44
     T = 17 / 365
     marketVols = [0.4164, 0.408, 0.3996, 0.3913, 0.3832, 0.3754, 0.3678, 0.3604]
-    sabr_q = SABRfromQuantlib(K, F, T, marketVols)
 
-    newVols = sabr_q.fit()
+    import time
 
+    t1 = time.time()
+    sabr_q = SABR_obloj(K, F, T, marketVols)
+    sabr_q.fit()
+    newVols = sabr_q.predict()
+
+    t2 = time.time()
+    sabr_q2 = SABRfromQuantlib(K, F, T, marketVols)
+    sabr_q2.fit()
+    newVols2 = sabr_q2.predict()
+    t3 = time.time()
+    print(t2 - t1, t3 - t2)
     print(1)
 
     pass
