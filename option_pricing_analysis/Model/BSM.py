@@ -248,7 +248,7 @@ class ImpliedVolatility(object):
         fa = loss(a)
         fb = loss(b)
         iter_count = 0
-        while fa * fb > 0 and iter_count < max_iter:
+        while fa * fb > 0 and iter_count < max_iter and a < IV_LOWER_BOUND:
             if abs(fa) < abs(fb):
                 a /= 2  # Decrease a if f(a) is closer to zero
             else:
@@ -264,11 +264,16 @@ class ImpliedVolatility(object):
             diff = loss(ret_iv, )
             return ret_iv, diff
         else:
-
-            a = max(a, IV_LOWER_BOUND)
+            # b = max(b, 1)
             # ret_iv = brentq(other_loss, a, b)
-            diff = loss(a, )
-            return IV_LOWER_BOUND, diff
+            diff_b = loss(b, )
+            diff_a = loss(a, )
+
+            if diff_b <= diff_a:
+
+                return b, diff_b
+            else:
+                return IV_LOWER_BOUND, loss(IV_LOWER_BOUND, )
 
     # def Implied_volatility_Call(self, S, K, r, T, market_option_price, g=0, dividends='continuous'):
     #     return self.iv_brent(S, K, r, T, market_option_price, cp_sign='call', g=g, dividends=dividends)

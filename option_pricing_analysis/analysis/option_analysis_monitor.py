@@ -843,18 +843,24 @@ class ProcessReportLoadingTools(Tools):
                                   'AU\d{4}': 'SHF'}
                     ):
 
-        if not os.path.isdir(report_file_path):
-            raise ValueError(f'{report_file_path} is not folder')
+        if isinstance(report_file_path, str):
+            if not os.path.isdir(report_file_path):
+                raise ValueError(f'{report_file_path} is not folder')
 
-        # load daily report
-        # report_daily = os.path.join(report_file_path, daily_report)
-        daily_list = list(cls._load_multi_daily_reports_(os.path.join(report_file_path, daily_report)))
-        daily = pd.concat(daily_list) if len(daily_list) != 0 else None
+            # load daily report
+            # report_daily = os.path.join(report_file_path, daily_report)
+            daily_list = list(cls._load_multi_daily_reports_(os.path.join(report_file_path, daily_report)))
+            daily = pd.concat(daily_list) if len(daily_list) != 0 else None
 
-        # load period report
-        # report_period = os.path.join(report_file_path, period_report)
-        period_all = list(cls._load_multi_period_reports_(os.path.join(report_file_path, period_report)))
-        report_period_all = pd.concat(period_all) if len(period_all) != 0 else None
+            # load period report
+            # report_period = os.path.join(report_file_path, period_report)
+            period_all = list(cls._load_multi_period_reports_(os.path.join(report_file_path, period_report)))
+            report_period_all = pd.concat(period_all) if len(period_all) != 0 else None
+        elif isinstance(report_file_path, pd.DataFrame):
+            report_period_all = report_file_path
+            daily = None
+        else:
+            raise ValueError('report_file_path only accept path or df!')
 
         # merge daily and period
         if daily is not None:
@@ -1535,10 +1541,10 @@ class SummaryFunctions(object):
 
 class ReportAnalyst(ProcessReport, SummaryFunctions):
 
-    def grouper(self, df_dict, link_df, groupby='person'):
-        all_ls_output = all(map(lambda x: '多空输出' in x, df_dict.keys()))
-
-        pass
+    # def grouper(self, df_dict, link_df, groupby='person'):
+    #     all_ls_output = all(map(lambda x: '多空输出' in x, df_dict.keys()))
+    #
+    #     pass
 
     def groupby_person_summary(self, info_dict, person_link_df, groupby='person'):
         if groupby not in person_link_df.columns:
