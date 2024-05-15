@@ -102,7 +102,8 @@ class WindHelper(object):
                                                       date_fields=['EXE_ENDDATE', 'LASTDELIVERY_DATE', 'FTDATE_NEW',
                                                                    'STARTDATE'],
                                                       multiplier_fields=['CONTRACTMULTIPLIER'],
-                                                      underlying_code=['UNDERLYINGWINDCODE']
+                                                      underlying_code=['UNDERLYINGWINDCODE'],
+                                                      futures_margin=['MARGIN']
                                                       ):
         """
         Retrieve future information including last delivery dates and contract multipliers.
@@ -113,7 +114,7 @@ class WindHelper(object):
         if code_list is None:
             code_list = ["IF2312.CFE"]
 
-        cols_str = ",".join(date_fields + multiplier_fields + underlying_code).lower()
+        cols_str = ",".join(date_fields + multiplier_fields + underlying_code + futures_margin).lower()
         # "ftdate_new,startdate,lastdelivery_date,exe_enddate,contractmultiplier"
 
         err, last_deliv_and_multi = self.w.wss(','.join(code_list), cols_str, usedf=True)
@@ -1033,7 +1034,7 @@ class ProcessReportDataTools(object):
         # contracts = self._transactions['委托合约'].unique().tolist() if contracts is None else contracts
         lastdeliv_and_multi = wind_helper.get_future_info_last_delivery_date_underlying(contracts)
         lastdeliv_and_multi.index.name = '委托合约'
-        return lastdeliv_and_multi[['START_DATE', 'EXE_DATE', 'CONTRACTMULTIPLIER', 'UNDERLYINGWINDCODE']]
+        return lastdeliv_and_multi[['START_DATE', 'EXE_DATE', 'CONTRACTMULTIPLIER', 'UNDERLYINGWINDCODE', 'MARGIN']]
 
     @staticmethod
     def get_quote_iter(lastdeliv_and_multi: pd.DataFrame, wind_helper, today=None, min_start_dt='2024-01-01', ):
@@ -1222,7 +1223,7 @@ class ProcessReport(ProcessReportSingle):
 
         avg_price_df = pd.DataFrame(filter(lambda x: x[-1] is not None, avg_price),
                                     columns=['contract_code', '持仓方向', '平均开仓成本'])
-        res_avg_price_df = pd.merge(avg_price_df, lastdel_multi[['EXE_DATE', 'CONTRACTMULTIPLIER']].reset_index(),
+        res_avg_price_df = pd.merge(avg_price_df, lastdel_multi[['EXE_DATE', 'CONTRACTMULTIPLIER','MARGIN']].reset_index(),
                                     left_on=['contract_code'], right_on=['委托合约'], how='left').drop_duplicates()
         res_avg_price_rd_df = res_avg_price_df[res_avg_price_df['EXE_DATE'] >= datetime.datetime.today()]
         # contract_list = res_avg_price_rd_df['contract_code'].unique()
