@@ -405,7 +405,7 @@ class DerivativeSummary(ReportAnalyst):
         if contract_type == 'Future':
             return 0.01  # 有保证金占用
         elif contract_type == 'Option' and row['持仓方向'] == '空头':
-            return -0.01
+            return -1
         else:
             return 0
 
@@ -577,7 +577,7 @@ class DerivativeSummary(ReportAnalyst):
         person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted,contract_by_ls_summary = self.output_v2(
             info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
 
-        store_path = self.create_daily_summary_file_path(output_path='./', version='v3')
+        store_path = self.create_daily_summary_file_path(output_path='./', version='v4')
 
         with pd.ExcelWriter(store_path) as f:
             person_by_year_summary.to_excel(f, 'person_by_year_summary')
