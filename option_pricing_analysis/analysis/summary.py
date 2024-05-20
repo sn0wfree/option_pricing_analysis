@@ -577,7 +577,7 @@ class DerivativeSummary(ReportAnalyst):
         person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted,contract_by_ls_summary = self.output_v2(
             info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
 
-        store_path = self.create_daily_summary_file_path(output_path='./', version='v4')
+        store_path = self.create_daily_summary_file_path(output_path='./', version='v5')
 
         with pd.ExcelWriter(store_path) as f:
             person_by_year_summary.to_excel(f, 'person_by_year_summary')
@@ -641,7 +641,7 @@ if __name__ == '__main__':
                                                                                          "买平今": -1, })
 
     from upload import UploadDailyInfo
-    file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v4.xlsx')))
+    file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v5.xlsx')))
 
     # result_dict = pd.read_excel(file_name, sheet_name=None)
     # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
