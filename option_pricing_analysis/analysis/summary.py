@@ -534,7 +534,7 @@ class DerivativeSummary(ReportAnalyst):
         ##  添加计算保证金
         holding_contracts_price_info = self.cal_hld_contract_margin(res_avg_price_rd_df, holding_contracts_summary)
         hld_contracts_smy_mrgd2 = pd.merge(hld_contracts_smy_mrgd,
-                                           res_avg_price_rd_df[
+                                           holding_contracts_price_info[
                                                ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER','持仓方向']],
                                            left_on=['contract','持仓方向'], right_on=['contract_code','持仓方向'], how='left')
 
