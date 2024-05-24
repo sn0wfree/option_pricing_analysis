@@ -680,8 +680,11 @@ class DerivativesProcessTools(object):
 
         #  long
         if not sub_transactions[sub_transactions['买卖开平'].isin(['买开', '卖平'])].empty:
+
+            long_sub_transac = sub_transactions[sub_transactions['买卖开平'].isin(['买开', '卖平'])]
+
             long_executed_profit, long_res_sub, long_holding_value, long_net_unit, long_cum_sellvalue, long_cum_cost_df = cls.sub_parse_general_long(
-                end_dt, lastdel_multi, derivatives, sub_transactions,
+                end_dt, lastdel_multi, derivatives, long_sub_transac,
                 sub_quote, contract_type, open_symbol='买开', close_symbol='卖平')
         else:
             long_executed_profit, long_res_sub, long_holding_value, long_net_unit, long_cum_sellvalue, long_cum_cost_df = pd.DataFrame(
@@ -690,8 +693,11 @@ class DerivativesProcessTools(object):
                 columns=[derivatives]), pd.DataFrame(columns=[derivatives])
         # short
         if not sub_transactions[sub_transactions['买卖开平'].isin(['卖开', '买平'])].empty:
+
+            short_sub_transac = sub_transactions[sub_transactions['买卖开平'].isin(['卖开', '买平'])]
+
             short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_sellvalue, short_cum_cost_df = cls.sub_parse_general_short(
-                end_dt, lastdel_multi, derivatives, sub_transactions,
+                end_dt, lastdel_multi, derivatives, short_sub_transac,
                 sub_quote, contract_type, open_symbol='卖开', close_symbol='买平')
         else:
             short_executed_profit, short_res_sub, short_holding_value, short_net_unit, short_cum_sellvalue, short_cum_cost_df = pd.DataFrame(

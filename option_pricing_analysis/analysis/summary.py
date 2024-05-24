@@ -36,8 +36,10 @@ def create_summary_output_file_path(output_path='./'):
     _path = os.path.join(output_path, output_name_format)
     return _path
 
+
 def check_ls(data_dict, keyword):
     return {key: df for key, df in data_dict.items() if keyword in key and isinstance(df, pd.DataFrame)}
+
 
 class DerivativeSummary(ReportAnalyst):
     @staticmethod
@@ -396,7 +398,8 @@ class DerivativeSummary(ReportAnalyst):
             contract_name, direction = key[:2], key[2:4]
             last_cum_res = df['累计净损益(右轴)'].iloc[-1]
             res_ls.append([contract_name, direction, last_cum_res])
-        contract_last_cum = pd.DataFrame(res_ls, columns=['合约名称', '交易方向', '累计净损益']).pivot_table(index='合约名称',columns='交易方向',values='累计净损益')
+        contract_last_cum = pd.DataFrame(res_ls, columns=['合约名称', '交易方向', '累计净损益']).pivot_table(
+            index='合约名称', columns='交易方向', values='累计净损益')
         return contract_last_cum
 
     def output_v2(self, info_dict, lastdel_multi, output_config={'汇总': ['wj', 'gr', 'll'],
@@ -423,7 +426,7 @@ class DerivativeSummary(ReportAnalyst):
 
         target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价', '当日收益', '当日收益率',
                        '持仓名义市值', '平仓价值', '行权价值',
-                       '累计收益','累计收益率','近一周收益', '近一周收益率',
+                       '累计收益', '累计收益率', '近一周收益', '近一周收益率',
                        '近一月收益', '近一月收益率', ]
 
         year_cols = []
@@ -438,7 +441,7 @@ class DerivativeSummary(ReportAnalyst):
         person_by_year_summary['累计盈亏'] = person_by_year_summary.sum(axis=1)
         person_by_year_summary.index.name = '统计维度'
 
-        #分合约多空 要输出contract_by_ls
+        # 分合约多空 要输出contract_by_ls
         contract_by_ls_summary = self.latest_contract_ls(contract_summary_dict)
 
         # 期货多头：分人分年度分品种
@@ -488,13 +491,12 @@ class DerivativeSummary(ReportAnalyst):
 
         hld_contracts_smy_mrgd2 = pd.merge(hld_contracts_smy_mrgd,
                                            res_avg_price_rd_df[
-                                               ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER']],
-                                           left_on=['contract'], right_on=['contract_code'], how='left')
+                                               ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER','持仓方向']],
+                                           left_on=['contract','持仓方向'], right_on=['contract_code','持仓方向'], how='left')
         hld_contracts_smy_mrgd2.index = hld_contracts_smy_mrgd.index
 
         hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['持仓名义市值'] / (
-                hld_contracts_smy_mrgd2['持仓手数'] * hld_contracts_smy_mrgd2[
-            'CONTRACTMULTIPLIER'])
+                hld_contracts_smy_mrgd2['持仓手数'] * hld_contracts_smy_mrgd2['CONTRACTMULTIPLIER'])
 
         hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['现价'].abs()
 
@@ -502,13 +504,14 @@ class DerivativeSummary(ReportAnalyst):
             target_cols + sorted(set(year_cols))]
         holding_contracts_summary_merged_sorted.index.names = ['交易员', '统计维度']
 
-        return person_by_year_summary, person_cum_sub, comm_cum_sub, holding_contracts_summary_merged_sorted,contract_by_ls_summary
+        return person_by_year_summary, person_cum_sub, comm_cum_sub, holding_contracts_summary_merged_sorted, contract_by_ls_summary
 
     def auto_run(self, output_config,
                  quote_start_with='2022-06-04',
                  trade_type_mark={"卖开": 1, "卖平": -1,
                                   "买开": 1, "买平": -1,
-                                  "买平今": -1, }):
+                                  "买平今": -1, },
+                 version='v4'):
 
         # config = Configs(conf_file=conf_file)
 
@@ -530,10 +533,10 @@ class DerivativeSummary(ReportAnalyst):
                                                                                                return_data=True,
                                                                                                store_2_excel=False)
 
-        person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted,contract_by_ls_summary = self.output_v2(
+        person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted, contract_by_ls_summary = self.output_v2(
             info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
 
-        store_path = self.create_daily_summary_file_path(output_path='./', version='v3')
+        store_path = self.create_daily_summary_file_path(output_path='./', version=version)
 
         with pd.ExcelWriter(store_path) as f:
             person_by_year_summary.to_excel(f, 'person_by_year_summary')
@@ -584,7 +587,7 @@ class DerivativeSummary(ReportAnalyst):
 
 
 if __name__ == '__main__':
-
+    version = 'v4'
 
     config = Configs()
 
@@ -594,20 +597,23 @@ if __name__ == '__main__':
 
     PR.auto_run(config['output_config'], quote_start_with='2022-06-04', trade_type_mark={"卖开": 1, "卖平": -1,
                                                                                          "买开": 1, "买平": -1,
-                                                                                         "买平今": -1, })
+                                                                                         "买平今": -1, },
+                version=version
+                )
 
-    from upload import UploadDailyInfo
-    file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v3.xlsx')))
-
-    # result_dict = pd.read_excel(file_name, sheet_name=None)
-    # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
-    # sql_dict = config['sql_dict']
-    # traders = config['output_config']['汇总']
-
-    node = BaseSingleFactorTableNode(config['src'])
-    UDI = UploadDailyInfo(file_name)
-    UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
-                   traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
+    # from upload import UploadDailyInfo
+    #
+    # file_name = max(list(glob(f'日度衍生品交易收益率统计及汇总@*{version}.xlsx')))
+    #
+    # # result_dict = pd.read_excel(file_name, sheet_name=None)
+    # # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
+    # # sql_dict = config['sql_dict']
+    # # traders = config['output_config']['汇总']
+    #
+    # node = BaseSingleFactorTableNode(config['src'])
+    # UDI = UploadDailyInfo(file_name)
+    # UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
+    #                traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
 
     pass
 
