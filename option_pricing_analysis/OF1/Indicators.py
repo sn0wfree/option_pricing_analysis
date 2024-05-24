@@ -1,24 +1,24 @@
 # -*- coding: utf8 -*-
 import numpy as np
 import scipy.stats as sps
-try:
-    from ..APICenter import API
-    from ..DataCenter import DataCenter
-    from ..OF1 import OptionPricing as OP
-except ValueError:
-    import sys
-    sys.path.append('../')
-    from APICenter import API
-    from DataCenter import DataCenter
-    from OF1 import OptionPricing as OP
+# try:
+#     from ..APICenter import API
+#     from ..DataCenter import DataCenter
+#     from ..OF1 import OptionPricing as OP
+# except ValueError:
+#     import sys
+#     sys.path.append('../')
+#     from APICenter import API
+#     from DataCenter import DataCenter
+#     from OF1 import OptionPricing as OP
 
 
 NORM_CDF = sps.norm.cdf
 NORM_PDF = sps.norm.pdf
 
 
-Api = API()
-Data = DataCenter()
+# Api = API()
+# Data = DataCenter()
 
 # load function in current path
 IV_LOWER_BOUND = 1e-8
@@ -62,7 +62,8 @@ class Sensibility(object):
 
         pass
 
-    def getGreeks(self, UnderlyingPrice,  # UnderlyingPrice
+    def getGreeks(self,
+                  UnderlyingPrice,  # UnderlyingPrice
                   Strike,                 # StrikePrice
                   Volatility,             # volatility
                   Time2Maturity,          # Time2Maturity
@@ -231,20 +232,20 @@ if __name__ == '__main__':
 
     print( Delta, Gamma, Vega, Theta, Rho)
     # get IV
-    IV = OP.ImpliedVolatility()
-    # s:Underlying Assets Price
-    # k:Strike Price
-    # r:risk free interest rate
-    # T:avaiable time
-    # sigma:square root of annual variance
-    # cp: call or put fee
-    # g: dividend yield
-    # dividends:continuous
-    sigma, status, ratio = IV.ImpliedVolatility_OlD(S=2.634,
-                                                    K=2.45,
-                                                    r=0.04,
-                                                    T=18.0 / 252,
-                                                    cp=1.00998,
-                                                    cp_sign=-1,
-                                                    g=0)
-    print(sigma, status, ratio)
+    # IV = OP.ImpliedVolatility()
+    # # s:Underlying Assets Price
+    # # k:Strike Price
+    # # r:risk free interest rate
+    # # T:avaiable time
+    # # sigma:square root of annual variance
+    # # cp: call or put fee
+    # # g: dividend yield
+    # # dividends:continuous
+    # sigma, status, ratio = IV.ImpliedVolatility_OlD(S=2.634,
+    #                                                 K=2.45,
+    #                                                 r=0.04,
+    #                                                 T=18.0 / 252,
+    #                                                 cp=1.00998,
+    #                                                 cp_sign=-1,
+    #                                                 g=0)
+    # print(sigma, status, ratio)
