@@ -402,6 +402,49 @@ class DerivativeSummary(ReportAnalyst):
             index='合约名称', columns='交易方向', values='累计净损益')
         return contract_last_cum
 
+    @staticmethod
+    def add_margin(row):
+        contract_type = Tools.code_type_detect(row['contract'])
+        if contract_type == 'Future':
+            return 0.01  # 有保证金占用
+        elif contract_type == 'Option' and row['持仓方向'] == '空头':
+            return -1
+        else:
+            return 0
+
+    @staticmethod
+    def cal_margin(hld_contracts_mgd):
+        contract_type = Tools.code_type_detect(hld_contracts_mgd['contract'])
+        if contract_type == 'Future':
+            return hld_contracts_mgd['保证金']*hld_contracts_mgd['持仓手数']\
+                         *hld_contracts_mgd['CONTRACTMULTIPLIER']*hld_contracts_mgd['MARGIN']*hld_contracts_mgd['平均开仓成本']
+        elif contract_type == 'Option':
+            return hld_contracts_mgd['保证金']*hld_contracts_mgd['持仓手数']*hld_contracts_mgd['MARGIN']
+        else:
+            return None
+
+    def cal_hld_contract_margin(self,res_avg_price_rd_df,holding_contracts_summary):
+        for i,df in enumerate(holding_contracts_summary):
+            df['保证金'] = df.apply(self.add_margin, axis=1)
+            holding_contracts_summary[i]=df
+            hld_contracts_mgd = pd.merge(holding_contracts_summary[i],res_avg_price_rd_df[
+                                  ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER','MARGIN']],
+                                left_on=['contract'], right_on=['contract_code'], how='left')
+            hld_contracts_mgd['保证金占用'] = hld_contracts_mgd.apply(self.cal_margin,axis=1)
+            res_avg_price_rd_df = res_avg_price_rd_df.merge(
+                hld_contracts_mgd[['contract_code','保证金占用']],
+                on='contract_code',
+                how='left',
+            )
+        res_avg_price_rd_df['保证金占用'] = res_avg_price_rd_df['保证金占用_x'].combine_first(res_avg_price_rd_df['保证金占用_y'])
+        res_avg_price_rd_df.drop(columns=['保证金占用_x', '保证金占用_y'], inplace=True)
+
+        return res_avg_price_rd_df
+
+
+
+
+
     def output_v2(self, info_dict, lastdel_multi, output_config={'汇总': ['wj', 'gr', 'll'],
                                                                  '期货多头': ['wj', 'gr'],
                                                                  '期货对冲': ['IM'],
@@ -424,7 +467,7 @@ class DerivativeSummary(ReportAnalyst):
         person_holder, merged_summary_dict, contract_summary_dict = self.group_by_summary(
             info_dict, return_data=True, store_2_excel=False)
 
-        target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价', '当日收益', '当日收益率',
+        target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价','保证金占用', '当日收益', '当日收益率',
                        '持仓名义市值', '平仓价值', '行权价值',
                        '累计收益', '累计收益率', '近一周收益', '近一周收益率',
                        '近一月收益', '近一月收益率', ]
@@ -488,11 +531,13 @@ class DerivativeSummary(ReportAnalyst):
                                                              trade_type=trade_type,
                                                              dt_col='报单日期时间',
                                                              method=method)
-
+        ##  添加计算保证金
+        holding_contracts_price_info = self.cal_hld_contract_margin(res_avg_price_rd_df, holding_contracts_summary)
         hld_contracts_smy_mrgd2 = pd.merge(hld_contracts_smy_mrgd,
                                            res_avg_price_rd_df[
                                                ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER','持仓方向']],
                                            left_on=['contract','持仓方向'], right_on=['contract_code','持仓方向'], how='left')
+
         hld_contracts_smy_mrgd2.index = hld_contracts_smy_mrgd.index
 
         hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['持仓名义市值'] / (
@@ -536,7 +581,9 @@ class DerivativeSummary(ReportAnalyst):
         person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted, contract_by_ls_summary = self.output_v2(
             info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
 
+
         store_path = self.create_daily_summary_file_path(output_path='./', version=version)
+
 
         with pd.ExcelWriter(store_path) as f:
             person_by_year_summary.to_excel(f, 'person_by_year_summary')
@@ -601,19 +648,20 @@ if __name__ == '__main__':
                 version=version
                 )
 
-    # from upload import UploadDailyInfo
-    #
-    # file_name = max(list(glob(f'日度衍生品交易收益率统计及汇总@*{version}.xlsx')))
-    #
-    # # result_dict = pd.read_excel(file_name, sheet_name=None)
-    # # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
-    # # sql_dict = config['sql_dict']
-    # # traders = config['output_config']['汇总']
-    #
-    # node = BaseSingleFactorTableNode(config['src'])
-    # UDI = UploadDailyInfo(file_name)
-    # UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
-    #                traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
+
+    from upload import UploadDailyInfo
+    file_name = max(list(glob('日度衍生品交易收益率统计及汇总@*v5.xlsx')))
+
+    # result_dict = pd.read_excel(file_name, sheet_name=None)
+    # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
+    # sql_dict = config['sql_dict']
+    # traders = config['output_config']['汇总']
+
+    node = BaseSingleFactorTableNode(config['src'])
+    UDI = UploadDailyInfo(file_name)
+    UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
+                   traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
+
 
     pass
 
