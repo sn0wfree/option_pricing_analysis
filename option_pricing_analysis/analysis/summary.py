@@ -367,11 +367,12 @@ class DerivativeSummary(ReportAnalyst):
             columns={'level_0': 'person', 'level_1': 'contract'})
 
         for summary in holding_contracts_summary:
-            # re_index_summary = summary.reset_index()
-            person, contract = list(zip(*summary.index))
-            summary['person'] = person
-            summary['contract'] = contract
-            yield summary
+            if not summary.empty:
+                # re_index_summary = summary.reset_index()
+                person, contract = list(zip(*summary.index))
+                summary['person'] = person
+                summary['contract'] = contract
+                yield summary
 
     @staticmethod
     def clean_order_for_summary_df(holding_contracts_summary_merged):
@@ -462,7 +463,8 @@ class DerivativeSummary(ReportAnalyst):
     def cal_hld_contract_margin(cls, res_avg_price_rd_df, hld_contracts_smy_mrgd):
         holding_contracts_summary_margin_added = pd.merge(hld_contracts_smy_mrgd,
                                                           res_avg_price_rd_df[
-                                                              ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER','MARGIN',
+                                                              ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER',
+                                                               'MARGIN',
                                                                '持仓方向']],
                                                           left_on=['contract', '持仓方向'],
                                                           right_on=['contract_code', '持仓方向'],
@@ -672,8 +674,7 @@ if __name__ == '__main__':
     PR.auto_run(config['output_config'], quote_start_with='2022-06-04', trade_type_mark={"卖开": 1, "卖平": -1,
                                                                                          "买开": 1, "买平": -1,
                                                                                          "买平今": -1, },
-                version=version
-                )
+                version=version)
 
     from upload import UploadDailyInfo
 
