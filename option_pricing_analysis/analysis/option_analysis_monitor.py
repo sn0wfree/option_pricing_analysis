@@ -1570,7 +1570,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             res = summary_ls_merged.copy(deep=True)
 
             res['累计持仓收益率'] = (res['累计净损益(右轴)'] / res['累计开仓成本'].abs()).fillna(0)
-            res['累计净值'] = res['累计持仓收益率'] + 1
+            res['累计净值'] = (res['累计净损益(右轴)'] /30000000) + 1
 
             for commodity, ddff in dfdd.groupby('commodity'):
                 commodity_contracts2 = ddff['contract'].unique().tolist()
