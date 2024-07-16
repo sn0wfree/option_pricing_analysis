@@ -44,7 +44,7 @@ def check_ls(data_dict, keyword):
 class DerivativeSummary(ReportAnalyst):
     @staticmethod
     def _cal_year_result(col, pnl, nv):
-        res = pnl.resample('Y').last()
+        res = pnl.resample('YE').last()
         res.index = res.index.year
         y1 = res.head(1)
         res2 = pd.concat([y1, res.fillna(0).diff(1).dropna()], axis=0)
@@ -52,7 +52,7 @@ class DerivativeSummary(ReportAnalyst):
         for amt_k, amt_v in res2.to_dict().items():
             yield amt_k, amt_v
         # 收益率
-        nv_year = nv.resample('Y').last()
+        nv_year = nv.resample('YE').last()
         nv_year.index = nv_year.index.year
         y1 = (nv_year.head(1) - 1) / 1
         nv_ret2 = pd.concat([y1, nv_year.fillna(1).pct_change(1).dropna()], axis=0)
@@ -349,7 +349,7 @@ class DerivativeSummary(ReportAnalyst):
                 c_pnl = current_pnl.tail(1)
                 c_pnl.index = ['当日损益']
 
-                res = df.resample('Y').last()['累计净损益(右轴)'].to_frame(person)
+                res = df.resample('YE').last()['累计净损益(右轴)'].to_frame(person)
                 res.index = res.index.year
                 y1 = res.head(1)
                 cum = res.tail(1)
@@ -613,15 +613,15 @@ class DerivativeSummary(ReportAnalyst):
         store_path = self.create_daily_summary_file_path(output_path='./', version=version)
 
         with pd.ExcelWriter(store_path) as f:
-            person_by_year_summary.to_excel(f, 'person_by_year_summary')
-            person_cum_sub.to_excel(f, 'person_cum_sub')
-            commodity_cum_sub.to_excel(f, 'commodity_cum_sub')
-            holding_summary_merged_sorted.to_excel(f, 'holding_summary_merged_sorted')
-            contract_by_ls_summary.to_excel(f, 'contract_by_ls_summary')
+            person_by_year_summary.to_excel(f, sheet_name = 'person_by_year_summary')
+            person_cum_sub.to_excel(f, sheet_name = 'person_cum_sub')
+            commodity_cum_sub.to_excel(f, sheet_name = 'commodity_cum_sub')
+            holding_summary_merged_sorted.to_excel(f, sheet_name = 'holding_summary_merged_sorted')
+            contract_by_ls_summary.to_excel(f, sheet_name = 'contract_by_ls_summary')
 
             for name, data in sorted(person_holder_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
-                data.to_excel(f, name)
+                data.to_excel(f, sheet_name = name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
 
@@ -635,33 +635,33 @@ class DerivativeSummary(ReportAnalyst):
             ## 分合约计算盈亏
             for name, data in sorted(merged_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
-                data.to_excel(f, name)
+                data.to_excel(f, sheet_name = name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
 
             for name, data in sorted(contract_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
-                data.to_excel(f, name)
+                data.to_excel(f, sheet_name = name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
 
-            info_dict['衍生品多头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头持仓价值截面')
-            info_dict['衍生品多头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品多头累计开仓成本')
-            info_dict['衍生品多头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品多头累计平仓价值')
-            info_dict['衍生品多头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计行权收益')
-            info_dict['衍生品多头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品多头累计净损益')
-            info_dict['衍生品多头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品多头剩余合约数')
+            info_dict['衍生品多头持仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头持仓价值截面')
+            info_dict['衍生品多头累计开仓成本'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计开仓成本')
+            info_dict['衍生品多头累计平仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计平仓价值')
+            info_dict['衍生品多头累计行权收益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计行权收益')
+            info_dict['衍生品多头累计净损益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计净损益')
+            info_dict['衍生品多头剩余份数'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头剩余合约数')
 
-            info_dict['衍生品空头持仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头持仓价值截面')
-            info_dict['衍生品空头累计开仓成本'].reindex(columns=contracts).to_excel(f, '衍生品空头累计开仓成本')
-            info_dict['衍生品空头累计平仓价值'].reindex(columns=contracts).to_excel(f, '衍生品空头累计平仓价值')
-            info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计行权收益')
-            info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计净损益')
-            info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
+            info_dict['衍生品空头持仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头持仓价值截面')
+            info_dict['衍生品空头累计开仓成本'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计开仓成本')
+            info_dict['衍生品空头累计平仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计平仓价值')
+            info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计行权收益')
+            info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计净损益')
+            info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头剩余合约数')
 
 
 if __name__ == '__main__':
-    version = 'v5'
+    version = 'v6'
 
     config = Configs()
 
