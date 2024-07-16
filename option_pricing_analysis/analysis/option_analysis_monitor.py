@@ -3,7 +3,8 @@ import copy
 import datetime
 import os
 import re
-from collections import Callable, ChainMap, deque
+from collections.abc import Callable
+from collections import  ChainMap, deque
 from collections.abc import Iterable
 from glob import glob
 
@@ -12,7 +13,8 @@ import pandas as pd
 import yaml
 from CodersWheel.QuickTool.detect_file_path import detect_file_full_path
 from CodersWheel.QuickTool.file_cache import file_cache
-
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 class WindHelper(object):
     """
@@ -857,6 +859,7 @@ class ProcessReportLoadingTools(Tools):
             # load daily report
             # report_daily = os.path.join(report_file_path, daily_report)
             daily_list = list(cls._load_multi_daily_reports_(os.path.join(report_file_path, daily_report)))
+            daily_list = [df for df in daily_list if not df.empty and not df.isna().all().all()]
             daily = pd.concat(daily_list) if len(daily_list) != 0 else None
 
             # load period report
@@ -1153,6 +1156,7 @@ class ProcessReportSingle(ProcessReportLoadingTools, ProcessReportDataTools):  #
     def prepare_transactions(transactions, trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, }):
         transactions['买卖开平'] = transactions['买卖'] + transactions['开平']
         transactions['trade_type'] = transactions['买卖开平'].replace(trade_type_mark)
+        transactions['trade_type'] = transactions['trade_type'].infer_objects(copy=False)
         transactions['unit'] = transactions['手数'] * transactions['CONTRACTMULTIPLIER']  # 添加合约乘数
         transactions['cost'] = transactions['unit'] * transactions['成交均价'] * transactions['trade_type']
         transactions['报单日期'] = pd.to_datetime(transactions['报单日期'], format='%Y%m%d')
@@ -1241,6 +1245,7 @@ class ProcessReport(ProcessReportSingle):
     def conct_and_rd_all_zero_rows_and_parse_more(long_cum_cost_df):
         mask = ~(long_cum_cost_df.fillna(0) == 0).all(axis=1)
         mask = mask.shift(-1).fillna(True)
+        mask = mask.infer_objects(copy=False)
         df = long_cum_cost_df[mask]
         # df = df.index.dt.date
         return df
@@ -1266,22 +1271,28 @@ class ProcessReport(ProcessReportSingle):
         direct_name = '多头' if direct.lower() == 'long' else '空头'
 
         # long or short
-        long_holding_df = pd.concat(long_holding_value_holder, axis=1).reindex(index=quote.index).fillna(0)  # 期权残值
+        long_holding_df = pd.concat(long_holding_value_holder, axis=1).reindex(index=quote.index).fillna(0)# 期权残值
+        # long_holding_df = long_holding_df.infer_objects(copy=False)
         long_holding_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_holding_df)
 
         long_unit_df = pd.concat(long_unit_holder, axis=1).reindex(index=quote.index).fillna(0)  # 多头持仓份数
+        # long_unit_df = long_unit_df.infer_objects(copy=False)
         long_unit_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_unit_df)
 
-        long_cum_cost_df = pd.concat(long_cum_cost_df_holder, axis=1).reindex(index=quote.index).fillna(0)  # 累计开仓成本
+        long_cum_cost_df = pd.concat(long_cum_cost_df_holder, axis=1).reindex(index=quote.index).fillna(0) # 累计开仓成本
+        # long_cum_cost_df = long_cum_cost_df.infer_objects(copy=False)
         long_cum_cost_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_cum_cost_df)
 
         long_value_df = pd.concat(long_value_holder, axis=1).reindex(index=quote.index).ffill().fillna(0)  # '累计平仓价值'
+        # long_value_df = long_value_df.infer_objects(copy=False)
         long_value_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_value_df)
 
-        long_executed_df = pd.concat(long_executed_holder, axis=1).reindex(index=quote.index).fillna(0)  # '累计行权收益'
+        long_executed_df = pd.concat(long_executed_holder, axis=1).reindex(index=quote.index).fillna(0) # '累计行权收益'
+        # long_executed_df = long_executed_df.infer_objects(copy=False)
         long_executed_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_executed_df)
 
-        long_res = pd.concat(long_result_holder, axis=1).reindex(index=quote.index).ffill()  # 累计净损益
+        long_res = pd.concat(long_result_holder, axis=1).reindex(index=quote.index).ffill() # 累计净损益
+        # long_res = long_res.infer_objects(copy=False)
         long_res = cls.conct_and_rd_all_zero_rows_and_parse_more(long_res)
 
         temp_holder = (long_holding_df, long_unit_df, long_cum_cost_df, long_value_df, long_executed_df, long_res)
@@ -1556,7 +1567,11 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
     def groupby_person_summary(self, info_dict, person_link_df, groupby='person'):
         if groupby not in person_link_df.columns:
             raise ValueError(f'group by value({groupby}) on in link_df!')
-
+        cost_dict = {
+            'gr': 10000000,
+            'wj': 30000000,
+            'll': 30000000,
+        }
         # person_ls_summary_dict = {}
         person_holder = {}
         for person, dfdd in person_link_df.groupby(groupby):
@@ -1570,7 +1585,8 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             res = summary_ls_merged.copy(deep=True)
 
             res['累计持仓收益率'] = (res['累计净损益(右轴)'] / res['累计开仓成本'].abs()).fillna(0)
-            res['累计净值'] = (res['累计净损益(右轴)'] /30000000) + 1
+            initial_cost = cost_dict.get(person, 30000000)
+            res['累计净值'] = (res['累计净损益(右轴)'] /initial_cost) + 1    #成本改成参数
 
             for commodity, ddff in dfdd.groupby('commodity'):
                 commodity_contracts2 = ddff['contract'].unique().tolist()
@@ -1602,14 +1618,14 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
                                                                                  symbol=commodity)
             if not x_long_summary_info.empty and not (x_long_summary_info == 0).all().all():
 
-                contract_summary_dict[f'{commodity}多头输出'] = x_long_summary_info
+                contract_summary_dict[f'{commodity}多头输出'] = x_long_summary_info.sort_index()
                 # x_long_summary_info.to_excel(f, f'{commodity}多头输出')
             else:
                 x_long_summary_info = None
 
             if not x_short_summary_info.empty and not (x_short_summary_info == 0).all().all():
                 x_short_summary_info = self.conct_and_rd_all_zero_rows_and_parse_more(x_short_summary_info)
-                contract_summary_dict[f'{commodity}空头输出'] = x_short_summary_info
+                contract_summary_dict[f'{commodity}空头输出'] = x_short_summary_info.sort_index()
                 # x_short_summary_info.to_excel(f, f'{commodity}空头输出')
             else:
                 x_short_summary_info = None
@@ -1743,7 +1759,7 @@ if __name__ == '__main__':
     wh = WindHelper()
 
     PR = ReportAnalyst(
-        report_file_path='C:\\Users\\linlu\\Documents\\GitHub\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
+        report_file_path='E:\\prt\\pf_analysis\\pf_analysis\\optionanalysis\\report_file',
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'HO\d{4}-[CP]-[0-9]+.CFE': 'll',
                                 'IO\d{4}-[CP]-[0-9]+.CFE': 'll',
