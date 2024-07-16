@@ -1,5 +1,4 @@
 # coding=utf-8
-import datetime
 
 import pandas as pd
 from ClickSQL import BaseSingleFactorTableNode
@@ -127,22 +126,20 @@ class MockBackTest(DerivativeSummary):
             info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
 
 
-
-
 if __name__ == '__main__':
     uri = 'clickhouse://default:Imsn0wfree@47.104.186.157:8123/system'
 
-    transac_name = 'op_arb_strategy_test1_put'
+    transac_name = 'op_pred_arb_strategy'
 
     wh = WindHelper()
     config = Configs()
 
     PR = MockBackTest(
-        uri, transac_name, 'trial_1_put', db='mock_op_backtest',
+        uri, transac_name, 'trial_2_pred', db='mock_op_backtest',
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll', }
 
     )
-    PR.auto(wh, f'trail_1_{transac_name}.xlsx',
+    PR.auto(wh, f'trail_2_{transac_name}.xlsx',
 
             start_with='2022-01-04', trade_type_mark={"卖开": 1, "卖平": -1,
                                                       "买开": 1, "买平": -1,

@@ -7,7 +7,7 @@ from ClickSQL import BaseSingleFactorTableNode
 
 from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst, Configs, Tools
 
-
+import akshare
 def chunk(obj, chunks=2000):
     if hasattr(obj, '__len__'):
         length = len(obj)
@@ -584,9 +584,7 @@ class DerivativeSummary(ReportAnalyst):
 
     def auto_run(self, output_config,
                  quote_start_with='2022-06-04',
-                 trade_type_mark={"卖开": 1, "卖平": -1,
-                                  "买开": 1, "买平": -1,
-                                  "买平今": -1, },
+                 trade_type_mark={"卖开": 1, "卖平": -1,   "买开": 1, "买平": -1,  "买平今": -1, },
                  version='v4'):
 
         # config = Configs(conf_file=conf_file)
@@ -676,17 +674,17 @@ if __name__ == '__main__':
                                                                                          "买平今": -1, },
                 version=version)
 
-    from upload import UploadDailyInfo
-
-    file_name = max(list(glob(f'日度衍生品交易收益率统计及汇总@*{version}.xlsx')))
+    # from upload import UploadDailyInfo
+    #
+    # file_name = max(list(glob(f'日度衍生品交易收益率统计及汇总@*{version}.xlsx')))
 
     # result_dict = pd.read_excel(file_name, sheet_name=None)
     # summary = ['person_by_year_summary', 'person_cum_sub', 'commodity_cum_sub', 'holding_summary_merged_sorted', ]
     # sql_dict = config['sql_dict']
     # traders = config['output_config']['汇总']
 
-    node = BaseSingleFactorTableNode(config['src'])
-    UDI = UploadDailyInfo(file_name)
+    # node = BaseSingleFactorTableNode(config['src'])
+    # UDI = UploadDailyInfo(file_name)
     # UDI.upload_all(node, mappings_link=config['mappings_link'], sheet_key_word='输出',
     #                traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
 
