@@ -3,8 +3,9 @@ import copy
 import datetime
 import os
 import re
+import warnings
+from collections import ChainMap, deque
 from collections.abc import Callable
-from collections import  ChainMap, deque
 from collections.abc import Iterable
 from glob import glob
 
@@ -13,8 +14,9 @@ import pandas as pd
 import yaml
 from CodersWheel.QuickTool.detect_file_path import detect_file_full_path
 from CodersWheel.QuickTool.file_cache import file_cache
-import warnings
+
 warnings.filterwarnings('ignore', category=FutureWarning)
+
 
 class WindHelper(object):
     """
@@ -1233,7 +1235,8 @@ class ProcessReport(ProcessReportSingle):
 
         avg_price_df = pd.DataFrame(filter(lambda x: x[-1] is not None, avg_price),
                                     columns=['contract_code', '持仓方向', '平均开仓成本'])
-        res_avg_price_df = pd.merge(avg_price_df, lastdel_multi[['EXE_DATE', 'CONTRACTMULTIPLIER','MARGIN']].reset_index(),
+        res_avg_price_df = pd.merge(avg_price_df,
+                                    lastdel_multi[['EXE_DATE', 'CONTRACTMULTIPLIER', 'MARGIN']].reset_index(),
                                     left_on=['contract_code'], right_on=['委托合约'], how='left').drop_duplicates()
         res_avg_price_rd_df = res_avg_price_df[res_avg_price_df['EXE_DATE'] >= datetime.datetime.today()]
         # contract_list = res_avg_price_rd_df['contract_code'].unique()
@@ -1271,7 +1274,7 @@ class ProcessReport(ProcessReportSingle):
         direct_name = '多头' if direct.lower() == 'long' else '空头'
 
         # long or short
-        long_holding_df = pd.concat(long_holding_value_holder, axis=1).reindex(index=quote.index).fillna(0)# 期权残值
+        long_holding_df = pd.concat(long_holding_value_holder, axis=1).reindex(index=quote.index).fillna(0)  # 期权残值
         # long_holding_df = long_holding_df.infer_objects(copy=False)
         long_holding_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_holding_df)
 
@@ -1279,7 +1282,7 @@ class ProcessReport(ProcessReportSingle):
         # long_unit_df = long_unit_df.infer_objects(copy=False)
         long_unit_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_unit_df)
 
-        long_cum_cost_df = pd.concat(long_cum_cost_df_holder, axis=1).reindex(index=quote.index).fillna(0) # 累计开仓成本
+        long_cum_cost_df = pd.concat(long_cum_cost_df_holder, axis=1).reindex(index=quote.index).fillna(0)  # 累计开仓成本
         # long_cum_cost_df = long_cum_cost_df.infer_objects(copy=False)
         long_cum_cost_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_cum_cost_df)
 
@@ -1287,11 +1290,11 @@ class ProcessReport(ProcessReportSingle):
         # long_value_df = long_value_df.infer_objects(copy=False)
         long_value_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_value_df)
 
-        long_executed_df = pd.concat(long_executed_holder, axis=1).reindex(index=quote.index).fillna(0) # '累计行权收益'
+        long_executed_df = pd.concat(long_executed_holder, axis=1).reindex(index=quote.index).fillna(0)  # '累计行权收益'
         # long_executed_df = long_executed_df.infer_objects(copy=False)
         long_executed_df = cls.conct_and_rd_all_zero_rows_and_parse_more(long_executed_df)
 
-        long_res = pd.concat(long_result_holder, axis=1).reindex(index=quote.index).ffill() # 累计净损益
+        long_res = pd.concat(long_result_holder, axis=1).reindex(index=quote.index).ffill()  # 累计净损益
         # long_res = long_res.infer_objects(copy=False)
         long_res = cls.conct_and_rd_all_zero_rows_and_parse_more(long_res)
 
@@ -1564,14 +1567,14 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
     #
     #     pass
 
-    def groupby_person_summary(self, info_dict, person_link_df, groupby='person'):
+    def groupby_person_summary(self, info_dict, person_link_df, groupby='person', cost_dict={
+        'gr': 10000000,
+        'wj': 30000000,
+        'll': 30000000,
+    }):
         if groupby not in person_link_df.columns:
             raise ValueError(f'group by value({groupby}) on in link_df!')
-        cost_dict = {
-            'gr': 10000000,
-            'wj': 30000000,
-            'll': 30000000,
-        }
+
         # person_ls_summary_dict = {}
         person_holder = {}
         for person, dfdd in person_link_df.groupby(groupby):
@@ -1586,7 +1589,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
 
             res['累计持仓收益率'] = (res['累计净损益(右轴)'] / res['累计开仓成本'].abs()).fillna(0)
             initial_cost = cost_dict.get(person, 30000000)
-            res['累计净值'] = (res['累计净损益(右轴)'] /initial_cost) + 1    #成本改成参数
+            res['累计净值'] = (res['累计净损益(右轴)'] / initial_cost) + 1  # 成本改成参数
 
             for commodity, ddff in dfdd.groupby('commodity'):
                 commodity_contracts2 = ddff['contract'].unique().tolist()
@@ -1680,7 +1683,11 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
             info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, '衍生品空头累计净损益')
             info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, '衍生品空头剩余合约数')
 
-    def group_by_summary(self, info_dict, base_store_path=None, return_data=False, store_2_excel=True):
+    def group_by_summary(self, info_dict, cost_dict={
+        'gr': 10000000,
+        'wj': 30000000,
+        'll': 30000000,
+    }, base_store_path=None, return_data=False, store_2_excel=True):
 
         contracts = self.reduced_contracts()
         person_link_df = pd.DataFrame(
@@ -1693,7 +1700,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
                                                                                     groupby='commodity')
 
         person_holder_dict = self.groupby_person_summary(info_dict,
-                                                         person_link_df, groupby='person')
+                                                         person_link_df, groupby='person',cost_dict=cost_dict)
 
         # 分人
 

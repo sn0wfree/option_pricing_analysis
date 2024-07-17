@@ -1,13 +1,11 @@
 import datetime
 import os
-from glob import glob
 
 import pandas as pd
-from ClickSQL import BaseSingleFactorTableNode
 
 from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst, Configs, Tools
 
-import akshare
+
 def chunk(obj, chunks=2000):
     if hasattr(obj, '__len__'):
         length = len(obj)
@@ -496,11 +494,16 @@ class DerivativeSummary(ReportAnalyst):
                   price_col='成交均价',
                   trade_type='trade_type',
 
-                  method='FIFO'
+                  method='FIFO', cost_dict={
+                'gr': 10000000,
+                'wj': 30000000,
+                'll': 30000000,
+            }
+
                   ):
 
         person_holder, merged_summary_dict, contract_summary_dict = self.group_by_summary(
-            info_dict, return_data=True, store_2_excel=False)
+            info_dict, return_data=True, store_2_excel=False, cost_dict=cost_dict)
 
         target_cols = ['持仓方向', '持仓手数', '平均开仓成本', '现价', '保证金占用', '当日收益', '当日收益率',
                        '持仓名义市值', '平仓价值', '行权价值',
@@ -583,9 +586,10 @@ class DerivativeSummary(ReportAnalyst):
         return person_by_year_summary, person_cum_sub, comm_cum_sub, holding_contracts_summary_merged_sorted, contract_by_ls_summary
 
     def auto_run(self, output_config,
-                 quote_start_with='2022-06-04',
-                 trade_type_mark={"卖开": 1, "卖平": -1,   "买开": 1, "买平": -1,  "买平今": -1, },
-                 version='v4'):
+                 quote_start_with='2022-06-04', version='v4',
+                 trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, "买平今": -1, },
+                 cost_dict={'gr': 10000000, 'wj': 30000000, 'll': 30000000}):
+        #
 
         # config = Configs(conf_file=conf_file)
 
@@ -605,7 +609,8 @@ class DerivativeSummary(ReportAnalyst):
 
         person_holder_dict, merged_summary_dict, contract_summary_dict = self.group_by_summary(info_dict,
                                                                                                return_data=True,
-                                                                                               store_2_excel=False)
+                                                                                               store_2_excel=False,
+                                                                                               cost_dict=cost_dict)
 
         person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted, contract_by_ls_summary = self.output_v2(
             info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
@@ -613,15 +618,15 @@ class DerivativeSummary(ReportAnalyst):
         store_path = self.create_daily_summary_file_path(output_path='./', version=version)
 
         with pd.ExcelWriter(store_path) as f:
-            person_by_year_summary.to_excel(f, sheet_name = 'person_by_year_summary')
-            person_cum_sub.to_excel(f, sheet_name = 'person_cum_sub')
-            commodity_cum_sub.to_excel(f, sheet_name = 'commodity_cum_sub')
-            holding_summary_merged_sorted.to_excel(f, sheet_name = 'holding_summary_merged_sorted')
-            contract_by_ls_summary.to_excel(f, sheet_name = 'contract_by_ls_summary')
+            person_by_year_summary.to_excel(f, sheet_name='person_by_year_summary')
+            person_cum_sub.to_excel(f, sheet_name='person_cum_sub')
+            commodity_cum_sub.to_excel(f, sheet_name='commodity_cum_sub')
+            holding_summary_merged_sorted.to_excel(f, sheet_name='holding_summary_merged_sorted')
+            contract_by_ls_summary.to_excel(f, sheet_name='contract_by_ls_summary')
 
             for name, data in sorted(person_holder_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
-                data.to_excel(f, sheet_name = name)
+                data.to_excel(f, sheet_name=name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
 
@@ -635,29 +640,35 @@ class DerivativeSummary(ReportAnalyst):
             ## 分合约计算盈亏
             for name, data in sorted(merged_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
-                data.to_excel(f, sheet_name = name)
+                data.to_excel(f, sheet_name=name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
 
             for name, data in sorted(contract_summary_dict.copy().items(), key=lambda d: d[0][:2], reverse=True):
                 data.index = data.index.strftime('%Y-%m-%d')
-                data.to_excel(f, sheet_name = name)
+                data.to_excel(f, sheet_name=name)
                 Tools.create_draw_from_opened_excel(f, data.shape[0], target_sheet=name)
                 print(f"{name} output!")
 
-            info_dict['衍生品多头持仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头持仓价值截面')
-            info_dict['衍生品多头累计开仓成本'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计开仓成本')
-            info_dict['衍生品多头累计平仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计平仓价值')
-            info_dict['衍生品多头累计行权收益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计行权收益')
-            info_dict['衍生品多头累计净损益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头累计净损益')
-            info_dict['衍生品多头剩余份数'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品多头剩余合约数')
+            info_dict['衍生品多头持仓价值'].reindex(columns=contracts).to_excel(f, sheet_name='衍生品多头持仓价值截面')
+            info_dict['衍生品多头累计开仓成本'].reindex(columns=contracts).to_excel(f,
+                                                                                    sheet_name='衍生品多头累计开仓成本')
+            info_dict['衍生品多头累计平仓价值'].reindex(columns=contracts).to_excel(f,
+                                                                                    sheet_name='衍生品多头累计平仓价值')
+            info_dict['衍生品多头累计行权收益'].reindex(columns=contracts).to_excel(f,
+                                                                                    sheet_name='衍生品多头累计行权收益')
+            info_dict['衍生品多头累计净损益'].reindex(columns=contracts).to_excel(f, sheet_name='衍生品多头累计净损益')
+            info_dict['衍生品多头剩余份数'].reindex(columns=contracts).to_excel(f, sheet_name='衍生品多头剩余合约数')
 
-            info_dict['衍生品空头持仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头持仓价值截面')
-            info_dict['衍生品空头累计开仓成本'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计开仓成本')
-            info_dict['衍生品空头累计平仓价值'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计平仓价值')
-            info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计行权收益')
-            info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头累计净损益')
-            info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, sheet_name = '衍生品空头剩余合约数')
+            info_dict['衍生品空头持仓价值'].reindex(columns=contracts).to_excel(f, sheet_name='衍生品空头持仓价值截面')
+            info_dict['衍生品空头累计开仓成本'].reindex(columns=contracts).to_excel(f,
+                                                                                    sheet_name='衍生品空头累计开仓成本')
+            info_dict['衍生品空头累计平仓价值'].reindex(columns=contracts).to_excel(f,
+                                                                                    sheet_name='衍生品空头累计平仓价值')
+            info_dict['衍生品空头累计行权收益'].reindex(columns=contracts).to_excel(f,
+                                                                                    sheet_name='衍生品空头累计行权收益')
+            info_dict['衍生品空头累计净损益'].reindex(columns=contracts).to_excel(f, sheet_name='衍生品空头累计净损益')
+            info_dict['衍生品空头剩余份数'].reindex(columns=contracts).to_excel(f, sheet_name='衍生品空头剩余合约数')
 
 
 if __name__ == '__main__':
@@ -672,7 +683,7 @@ if __name__ == '__main__':
     PR.auto_run(config['output_config'], quote_start_with='2022-06-04', trade_type_mark={"卖开": 1, "卖平": -1,
                                                                                          "买开": 1, "买平": -1,
                                                                                          "买平今": -1, },
-                version=version)
+                version=version, cost_dict=config['cost_dict'])
 
     # from upload import UploadDailyInfo
     #
