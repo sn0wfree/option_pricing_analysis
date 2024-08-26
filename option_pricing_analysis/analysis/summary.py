@@ -42,7 +42,7 @@ def check_ls(data_dict, keyword):
 class DerivativeSummary(ReportAnalyst):
     @staticmethod
     def _cal_year_result(col, pnl, nv):
-        res = pnl.resample('YE').last()
+        res = pnl.resample('Y').last()
         res.index = res.index.year
         y1 = res.head(1)
         res2 = pd.concat([y1, res.fillna(0).diff(1).dropna()], axis=0)
@@ -50,7 +50,7 @@ class DerivativeSummary(ReportAnalyst):
         for amt_k, amt_v in res2.to_dict().items():
             yield amt_k, amt_v
         # 收益率
-        nv_year = nv.resample('YE').last()
+        nv_year = nv.resample('Y').last()
         nv_year.index = nv_year.index.year
         y1 = (nv_year.head(1) - 1) / 1
         nv_ret2 = pd.concat([y1, nv_year.fillna(1).pct_change(1).dropna()], axis=0)
@@ -347,7 +347,7 @@ class DerivativeSummary(ReportAnalyst):
                 c_pnl = current_pnl.tail(1)
                 c_pnl.index = ['当日损益']
 
-                res = df.resample('YE').last()['累计净损益(右轴)'].to_frame(person)
+                res = df.resample('Y').last()['累计净损益(右轴)'].to_frame(person)
                 res.index = res.index.year
                 y1 = res.head(1)
                 cum = res.tail(1)

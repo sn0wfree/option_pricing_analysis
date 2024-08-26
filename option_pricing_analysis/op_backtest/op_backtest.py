@@ -129,19 +129,19 @@ class MockBackTest(DerivativeSummary):
 if __name__ == '__main__':
     uri = 'clickhouse://default:Imsn0wfree@47.104.186.157:8123/system'
 
-    transac_name = 'op_pred_arb_strategy'
+    transac_name = 'hedge1'
 
     wh = WindHelper()
     config = Configs()
 
     PR = MockBackTest(
-        uri, transac_name, 'trial_2_pred', db='mock_op_backtest',
+        uri, transac_name, 'hedge1', db='mock_op_backtest',
         contract_2_person_rule={'MO\d{4}-[CP]-[0-9]+.CFE': 'll', }
 
     )
     PR.auto(wh, f'trail_2_{transac_name}.xlsx',
 
-            start_with='2022-01-04', trade_type_mark={"卖开": 1, "卖平": -1,
+            start_with='2024-01-04', trade_type_mark={"卖开": 1, "卖平": -1,
                                                       "买开": 1, "买平": -1,
                                                       "买平今": -1, })
     print(1)
