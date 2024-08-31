@@ -1,11 +1,16 @@
 # coding=utf-8
+import datetime
 import warnings
+from functools import partial
+
+import akshare as ak
+import numpy as np
+import pandas as pd
 
 warnings.filterwarnings('ignore')
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
+from collections import ChainMap
+
 from CodersWheel.QuickTool.file_cache import file_cache
 
 from Indicators import Sensibility
@@ -13,6 +18,9 @@ from Indicators import Sensibility
 sensi_f = Sensibility()
 
 from scipy.optimize import minimize, LinearConstraint
+
+from option_analysis_monitor import ProcessReport, DerivativesItem, ReportAnalyst, ProcessReportSingle
+import matplotlib.pyplot as plt
 
 
 def cal_greek_with_given_f(row, f, DividendYield=0):
@@ -47,20 +55,35 @@ def cal_pnl(f, selected_with_weight):
     return call_pnl + put_pnl
 
 
+def opposite(input, opposite_tuple):
+    if input in opposite_tuple:
+        if input == opposite_tuple[0]:
+            return opposite_tuple[-1]
+        elif input == opposite_tuple[-1]:
+            return opposite_tuple[0]
+        else:
+            raise ValueError(f'opposite_tuple and input got wrong, {input} in opposite_tuple but not at last ot first')
+    else:
+        return input
+
+
 class OptionPortfolioWithDT(object):
-    __slots__ = ('_selected', '_multiply_num', '_weight', '_fake_f')
+    __slots__ = ('_selected', '_multiply_num', '_weight',)
 
     def __init__(self, selected, multiply_num=100):
         if len(selected['dt'].unique().tolist()) != 1:
             raise ValueError('only accept cross data! dt must be same!')
         self._selected = selected
         self._multiply_num = multiply_num
-        self._fake_f = CachedData.create_fake_greek_for_contract(selected)
 
         self._weight = []
 
+    @property
+    def _fake_f(self):
+        return CachedData.create_fake_greek_for_contract(self._selected)
+
     def __len__(self):
-        return len(self.avaiable_contract)
+        return len(self.available_contract)
 
     def get(self, contract_code):
         mask = self._selected['contract_code'] == contract_code
@@ -84,8 +107,9 @@ class OptionPortfolioWithDT(object):
         return tt.head(level)['contract_code'].values[-1]
 
     def level_call(self, level=1):
-        call = self.call.sort_values('f_k_diff', ascending=False)
         cp = 'C'
+        call = self.call.sort_values('f_k_diff', ascending=False)
+
         otm_mask = call['f_k_diff'] > 0 if cp == 'P' else call['f_k_diff'] < 0
         tt = call[otm_mask]
         return tt.head(level)['contract_code'].values[-1]
@@ -103,31 +127,31 @@ class OptionPortfolioWithDT(object):
         return self._selected['f'].unique().tolist()[0]
 
     @property
-    def avaiable_contract(self):
+    def available_contract(self):
         return self._selected['contract_code'].unique().tolist()
 
     @property
-    def avaiable_call_contract(self):
+    def available_call_contract(self):
 
         return self.call['contract_code'].unique().tolist()
 
     @property
-    def avaiable_put_contract(self):
+    def available_put_contract(self):
 
         return self.put['contract_code'].unique().tolist()
 
     @property
-    def avaiable_main_put_contract(self):
+    def available_main_put_contract(self):
         put_mask = self._selected['cp'] == 'P'
         main_mask = self._selected['main_mark'] != 0
-        #         avail_put = self.avaiable_put_contract
+        #         avail_put = self.available_put_contract
         return self.reduce_quote(self._selected[put_mask & main_mask])
 
     @property
-    def avaiable_main_call_contract(self):
+    def available_main_call_contract(self):
         call_mask = self._selected['cp'] == 'C'
         main_mask = self._selected['main_mark'] != 0
-        #         avail_put = self.avaiable_put_contract
+
         return self.reduce_quote(self._selected[call_mask & main_mask])
 
     @staticmethod
@@ -221,17 +245,318 @@ class OptionPortfolioWithDT(object):
 
         return Delta, Gamma, Vega, Theta, Rho
 
-    def run_opt(self, hedge_size, Delta, Gamma, Vega, Theta, Rho,verbose=True):
+    def run_opt(self, hedge_size, Delta, Gamma, Vega, Theta, Rho, verbose=True):
         # Delta, Gamma, Vega, Theta, Rho = self.create_greek_matrix_all()
         otm_selected = self._selected
 
         initial_weights = self.create_init_weight(hedge_size)
 
-        res = OptBundle.run_opt(initial_weights, otm_selected, hedge_size, Delta, Gamma, Vega, Rho, method='SLSQP',verbose=verbose)
+        res = OptBundle.run_opt(initial_weights, otm_selected, hedge_size, Delta, Gamma, Vega, Rho, method='SLSQP',
+                                verbose=verbose)
 
         otm_selected['weight'] = res.x
 
         return res
+
+
+class PortfolioHolder(list):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def long_side_reduce(df, direct_dict={'卖平': -1, '买开': 1}):
+
+        c = df['买卖'] + df['开平']
+        c_replaced = c.replace(direct_dict)
+        mask = c.isin(direct_dict.keys())
+
+        sub = df[mask]
+
+        if sub.empty:
+            return pd.DataFrame()
+        elif sub.shape[0] == 1:
+            return sub
+        else:
+            sub_df = df.head(1).copy(deep=True)
+            net_share = (df['手数'] * c_replaced).sum(axis=0)
+            if net_share == 0:
+                return pd.DataFrame()
+            else:
+
+                sub_df['成交均价'] = (df['手数'] * df['成交均价'] * c_replaced).sum(axis=0) / net_share
+                sub_df['买卖'] = '买' if net_share > 0 else '卖'
+                sub_df['开平'] = '开' if net_share > 0 else '平'
+                sub_df['手数'] = np.abs(net_share)
+                sub_df['手续费'] = sub_df['手数'] * sub_df['成交均价'] * 100 * (0.00432 / 100)
+                return sub_df
+
+    @staticmethod
+    def short_side_reduce(df, direct_dict={'买平': -1, '卖开': 1}):
+
+        c = df['买卖'] + df['开平']
+        c_replaced = c.replace(direct_dict)
+        mask = c.isin(direct_dict.keys())
+
+        sub = df[mask]
+
+        if sub.empty:
+            return pd.DataFrame()
+        elif sub.shape[0] == 1:
+            return sub
+        else:
+            sub_df = df.head(1).copy(deep=True)
+            net_share = (df['手数'] * c_replaced).sum(axis=0)
+
+            if net_share == 0:
+                return pd.DataFrame()
+            else:
+                sub_df['成交均价'] = (df['手数'] * df['成交均价'] * c_replaced).sum(axis=0) / net_share
+                sub_df['买卖'] = '卖' if net_share > 0 else '买'
+                sub_df['开平'] = '平' if net_share > 0 else '开'
+                sub_df['手数'] = np.abs(net_share)
+                sub_df['手续费'] = sub_df['手数'] * sub_df['成交均价'] * 100 * (0.00432 / 100)
+                return sub_df
+
+    def to_frame(self, reduce=False):
+        if len(self) != 0:
+            raw = pd.concat(self)
+            if reduce:
+                h = []
+
+                for _, df in raw.groupby(['委托合约', '报单时间']):
+                    c = df['买卖'] + df['开平']
+                    mask = c.isin(['买开', '卖平'])
+
+                    long = self.long_side_reduce(df[mask])
+
+                    if not long.empty:
+                        h.append(long)
+
+                    short = self.short_side_reduce(df[~mask])
+
+                    if not short.empty:
+                        h.append(short)
+
+                target_cols = ['报单日期', '委托合约', '手数', '未成交', '买卖', '开平', '成交均价', '挂单状态',
+                               '报单时间',
+                               '详细状态', '盈亏', '手续费', '成交号']
+
+                return pd.concat(h)[target_cols]
+            else:
+                return raw
+        else:
+            return pd.DataFrame()
+
+
+class OptionPortfolio(object):
+    def __init__(self, selected_matrix, multiply_num=100, dt_col='dt', code_col='contract_code'):
+        self._selected_matrix = selected_matrix
+        self._multiply_num = multiply_num
+        self._dt_col = dt_col
+        self._code_col = code_col
+        self._holder = PortfolioHolder()
+
+        self._expire_dict = dict(self._selected_matrix[['contract_code', 'expire_day']].drop_duplicates().values)
+
+    def records(self, reduce=False):
+
+        raw = self._holder.to_frame(reduce=reduce)
+
+        return raw
+
+    def holdings(self, end_dt='2099-07-12', ):
+        reduced_records = self.records(reduce=True)
+        h = []
+
+        long = self._records_to_holdings(reduced_records, end_dt, trade_type_selected=['买开', '卖平'])
+        if not long.empty:
+            long['方向'] = 'long'
+            h.append(long)
+
+        short = self._records_to_holdings(reduced_records, end_dt, trade_type_selected=['卖开', '买平'])
+        if not short.empty:
+            short['方向'] = 'short'
+            h.append(short)
+
+        return pd.concat(h)
+
+    @staticmethod
+    def _records_to_holdings(reduced_records, end_dt='2023-07-12',
+                             trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, },
+                             trade_type_selected=['买开', '卖平']):
+
+        test_data = reduced_records[reduced_records['报单时间'] <= end_dt].copy(deep=True)
+
+        test_data['买卖开平'] = test_data['买卖'] + test_data['开平']
+
+        test_data = test_data[test_data['买卖开平'].isin(trade_type_selected)]
+
+        test_data['手数方向'] = test_data['手数'] * test_data['买卖开平'].replace(trade_type_mark)
+
+        res = test_data.groupby('委托合约')['手数方向'].sum().to_frame('手数')
+
+        res['统计截至时间'] = end_dt
+
+        return res[res['手数'] != 0].reset_index()
+
+    @staticmethod
+    def mapping_records_to_holdings(reduced_records,
+                                    trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, },
+                                    trade_type_selected=['买开', '卖平']):
+
+        test_data = reduced_records.copy(deep=True)
+
+        test_data['买卖开平'] = test_data['买卖'] + test_data['开平']
+        test_data = test_data[test_data['买卖开平'].isin(trade_type_selected)]
+        test_data['手数方向'] = test_data['手数'] * test_data['买卖开平'].replace(trade_type_mark)
+
+        last = test_data.pivot_table(index='报单时间', columns='委托合约', values='手数方向', aggfunc='sum')
+
+        return last.fillna(0).cumsum()
+
+    @staticmethod
+    def status_to_translations(dd):
+        col_rename = {'dt': '报单日期', 'contract_code': '委托合约', 'fee': '成交均价'}
+
+        dd = dd.rename(columns=col_rename)
+        dd['买卖'] = ((dd['weight'] > 0) * 1).replace(1, '买').replace(0, '卖')
+        dd['开平'] = '开'
+        dd['手数'] = np.int64(dd['weight'].abs())
+        dd['挂单状态'] = '全部成交'
+        dd['报单时间'] = dd['报单日期']
+        dd['详细状态'] = '全部成交'
+        dd['盈亏'] = 0
+        dd['手续费'] = dd['手数'] * dd['成交均价'] * 100 * (0.00432 / 100)
+        dd['成交号'] = 'hedge1'
+        dd['未成交'] = 0
+        dd['remarks'] = 0
+        target_cols = ['报单日期', '委托合约', '手数', '未成交', '买卖', '开平', '成交均价', '挂单状态', '报单时间',
+                       '详细状态', '盈亏', '手续费', '成交号']
+
+        dd['报单日期'] = pd.to_datetime(dd['报单日期']).dt.strftime('%Y-%m-%d')
+        return dd[target_cols]
+
+    @classmethod
+    def _2_records(cls, dd):
+        dd['weight'] = dd['weight'].fillna(0)
+        dd_ = dd[dd['weight'] != 0]
+        raw_records = cls.status_to_translations(dd_)
+        raw_records.index = raw_records['委托合约']
+        return raw_records
+
+    @staticmethod
+    def add_sell_records(raw_records, next_quote_dict, next_dt, expire_dict):
+        h = []
+
+        for _, _d in raw_records.copy(deep=True).iterrows():
+
+            next_fee = next_quote_dict.get(_d['委托合约'])
+
+            if _d['报单日期'] <= expire_dict.get(_d['委托合约']) and next_fee is not None:
+                _d['成交均价'] = next_fee
+                _d['报单时间'] = next_dt
+
+                _d['买卖'] = opposite(_d['买卖'], ('买', '卖'))
+                _d['开平'] = opposite(_d['开平'], ('开', '平'))
+
+                _d['手续费'] = _d['手数'] * _d['成交均价'] * 100 * (0.00432 / 100)
+
+                _d['报单日期'] = pd.to_datetime(_d['报单时间']).strftime('%Y-%m-%d')
+
+                if _d.shape[0] == 13:
+                    h.append(_d.to_frame().T)
+                else:
+                    h.append(_d.to_frame())
+        if len(h) != 0:
+            sell_records = pd.concat(h).convert_dtypes()
+
+            dtypes_dict = raw_records.dtypes.to_dict()
+            return sell_records.astype(dtypes_dict)
+        else:
+            return None
+
+    @property
+    def _index(self):
+        return sorted(self._selected_matrix[self._dt_col].dt.strftime("%Y-%m-%d %H:%M:%S").unique().tolist())
+
+    def next_dt_dict(self):
+        return dict(zip(self._index[:-1], self._index[1:]))
+
+    def _get_given_dt_matrix(self, dt):
+
+        return self._selected_matrix[self._selected_matrix[self._dt_col] == dt]
+
+    def _mapping_index(self):
+        dts = self._index
+        for dt in dts:
+            yield dt, self._selected_matrix[self._dt_col] == dt
+
+    def __iter__(self):
+        return self  # 返回迭代器对象本身
+
+    def __next__(self):
+
+        t_mask = self._selected_matrix['t'] >= 0.01
+        for dt, dt_selected in self._selected_matrix[t_mask].groupby(self._dt_col):
+            ym_mask = dt_selected['ym'] == dt_selected['ym'].min()
+
+            yield dt, dt_selected[ym_mask]
+
+        # else:
+        #     raise StopIteration  # 没有更多元素时停止迭代
+
+    @staticmethod
+    def strategy(dt_selected, *args, **kwargs):
+        raise ValueError('not defined')
+
+    def mapping_strategy(self, *args, **kwargs):
+
+        for dt, dt_selected in self.__next__():
+            trading_selected = self.strategy(dt_selected, *args, **kwargs)
+            yield trading_selected
+
+    @staticmethod
+    def create_transactions(transactions, last_deliv_and_multi,
+                            trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, },
+                            reduced=False, return_df=False, ):
+        merged_transactions = pd.merge(transactions, last_deliv_and_multi.reset_index(),
+                                       left_on='委托合约', right_on='委托合约')
+        transactions = ProcessReportSingle.prepare_transactions(merged_transactions, trade_type_mark=trade_type_mark)
+        return transactions
+
+    @classmethod
+    def parse_transactions_with_quote_v2(cls, transactions, quote, lastdel_multi,
+                                         trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, "买平今": -1, },
+                                         ):
+        transactions = cls.create_transactions(transactions, lastdel_multi, reduced=False, return_df=True,
+                                               trade_type_mark=trade_type_mark)
+
+        result_holder = [
+            DerivativesItem.parse_bo2sc_so2pc(lastdel_multi, contract, sub_transaction, quote, return_dict=False) for
+            contract, sub_transaction in
+            transactions.groupby('委托合约')]
+
+        l1, l2, l3, l4, l5, l6, s1, s2, s3, s4, s5, s6 = list(zip(*result_holder))
+        # long
+        long_info_dict = ProcessReport._merged_function(l3, l4, l6, l5, l1, l2, quote, direct='long')
+        # short
+        short_info_dict = ProcessReport._merged_function(s3, s4, s6, s5, s1, s2, quote, direct='short')
+
+        return ChainMap(long_info_dict, short_info_dict)
+
+    @classmethod
+    def fast(cls, transactions, quote, lastdel_multi_hedge):
+
+        info_dict = cls.parse_transactions_with_quote_v2(transactions, quote, lastdel_multi_hedge.set_index('委托合约'))
+
+        commodity_contracts = transactions['委托合约'].unique().tolist()
+        x_long_summary_info, x_short_summary_info = ReportAnalyst.create_summary_info(commodity_contracts,
+                                                                                      info_dict,
+                                                                                      symbol='hedge')
+        summary_ls_merged = ReportAnalyst.long_short_merge('hedge', x_long_summary_info, x_short_summary_info)
+        summary_ls_merged['zz1000'] = quote['000852.SH']
+        # summary_ls_merged['msg'] = strategy_result.groupby('dt')['msg'].last()
+        return summary_ls_merged
 
 
 class CachedData(object):
@@ -399,12 +724,13 @@ class OptBundle(object):
         num_contracts = np.count_nonzero(weights)  # 合约数量
         total_share = np.sum(np.abs(weights))
 
-#         print('num_contracts: ', num_contracts, 'total_share: ', total_share)
+        #         print('num_contracts: ', num_contracts, 'total_share: ', total_share)
 
         return np.abs(cost) + (np.abs(delta_curve) + np.abs(pnl_curve)) ** 2
 
     @classmethod
-    def run_opt(cls, initial_weights, mask_selected, target_delta_exposure, Delta, Gamma, Vega, Rho, method='SLSQP',verbose=True):
+    def run_opt(cls, initial_weights, mask_selected, target_delta_exposure, Delta, Gamma, Vega, Rho, method='SLSQP',
+                verbose=True):
         # create_fake_portfolio_greek(fake_contract_code, weight_df)
 
         f = mask_selected['f'].unique().tolist()[0]
@@ -440,9 +766,8 @@ class OptBundle(object):
         result = minimize(objective, initial_weights, constraints=c1, bounds=bounds, method=method)
 
         opt_weight = np.int32(result.x)
-        
-        if verbose:
 
+        if verbose:
             # 打印结果
             print(result)
             print('损失函数：', objective(opt_weight))
@@ -512,42 +837,164 @@ def draw_greek_surface_pic2(res, selected, num_plots=6, num_cols=3,
     plt.show()
 
 
+def load_full_greek_data(name='full_greek_caled_marked_60m.parquet'):
+    full_greek_caled_marked_60m = pd.read_parquet(name)
+    full_greek_caled_marked_60m['contract_code'] = full_greek_caled_marked_60m['contract_code'].astype(str) + '.CFE'
+    full_greek_caled_marked_60m['OTM'] = ((full_greek_caled_marked_60m['f'] - full_greek_caled_marked_60m['k']) *
+                                          full_greek_caled_marked_60m['cp'].replace({'C': -1, 'P': 1}).astype(int)) >= 0
+
+    return full_greek_caled_marked_60m
+
+
+def find_third_friday(year, month):
+    # 创建一个当月第一天的日期对象
+    first_day_of_month = datetime.date(year, month, 1)
+
+    # 找到当月第一天是星期几
+    first_day_weekday = first_day_of_month.weekday()
+
+    # 计算到第一个周五需要的天数差
+    # 如果第一天是周五，weekday()将返回4，这样我们就不会进入循环
+
+    days_to_first_friday = 4 - first_day_weekday
+
+    # 计算第一个周五的日期
+    first_friday = first_day_of_month + datetime.timedelta(days=days_to_first_friday)
+
+    # 计算第三周五的日期
+    # 两个周五之间相隔14天，因此第三周五是第一个周五之后的14天
+    third_friday = first_friday + datetime.timedelta(weeks=2)
+
+    return third_friday
+
+
+def ym_to_expire_day(ym: str, working_days, year_prefix='20'):
+    year = int(year_prefix + str(ym)[:2])
+    m = int(str(ym)[2:])
+
+    day = pd.to_datetime(find_third_friday(year, m))
+
+    if day in working_days:
+        return day
+    else:
+        return working_days[working_days >= day].head(1).dt.strftime('%Y-%m-%d').values[0]
+
+
 if __name__ == '__main__':
     # select one day
+    # start_dt = '2023-01-01'
+    # hedge_size = -500 * 10000  # 设定对冲市值
+    # draw_pic = True
+    #
+    # full_greek_caled_marked = pd.read_parquet('full_greek_caled_marked.parquet')
+    # full_greek_caled_marked['OTM'] = ((full_greek_caled_marked['f'] - full_greek_caled_marked['k']) *
+    #                                   full_greek_caled_marked['cp'].replace({'C': -1, 'P': 1}).astype(int)) >= 0
+    #
+    # # 只选主力合约
+    # main_contract_mask = full_greek_caled_marked['t'] >= 0.02
+    # # select main contract
+    # main_mark = full_greek_caled_marked['main_mark'] >= 3
+    # start_dt_mask = full_greek_caled_marked['dt'] >= start_dt
+    #
+    # for dt, df in full_greek_caled_marked[main_mark & main_contract_mask & start_dt_mask].groupby('dt'):
+    #     if dt >= pd.to_datetime(start_dt):
+    #         # use 主力合约
+    #         ym_mask = df['ym'] == df['ym'].min()
+    #         selected = df[ym_mask]
+    #
+    #         otm_selected = selected[selected['OTM']]
+    #         otm_selected.index = otm_selected['contract_code']
+    #         otm_selected.index = otm_selected.index.astype(str)
+    #         # 这个设定为初始参数，方便快速配权
+    #
+    #         op_portfolio = OptionPortfolioWithDT(otm_selected)
+    #         Delta, Gamma, Vega, Theta, Rho = op_portfolio.create_greek_matrix_all()
+    #         # res = OptBundle.run_opt(initial_weights, otm_selected, hedge_size, Delta, Gamma, Vega, Rho, method='SLSQP')
+    #         res = op_portfolio.run_opt(hedge_size, Delta, Gamma, Vega, Theta, Rho)
+    #
+    #         op_portfolio._selected['success'] = res.success
+    #         op_portfolio._selected['msg'] = res.message
+    #
+    #         if draw_pic:
+    #             draw_greek_surface_pic2(res, op_portfolio._selected, num_plots=6, num_cols=3, )
+    #
+    # pass
+
+    tool_trade_date_hist_sina_df = ak.tool_trade_date_hist_sina()
+    working_days = pd.to_datetime(tool_trade_date_hist_sina_df['trade_date'])
+
+    #
     start_dt = '2023-01-01'
+
     hedge_size = -500 * 10000  # 设定对冲市值
-    draw_pic = True
+    draw_pic = False
 
-    full_greek_caled_marked = pd.read_parquet('full_greek_caled_marked.parquet')
-    full_greek_caled_marked['OTM'] = ((full_greek_caled_marked['f'] - full_greek_caled_marked['k']) *
-                                      full_greek_caled_marked['cp'].replace({'C': -1, 'P': 1}).astype(int)) >= 0
+    full_greek_caled_marked_60m = load_full_greek_data(name='full_greek_caled_marked_rmed_60m.parquet')
+    full_greek_caled_marked_60m_rd = full_greek_caled_marked_60m[full_greek_caled_marked_60m['main_mark'] >= 1]
 
-    # 只选主力合约
-    main_contract_mask = full_greek_caled_marked['t'] >= 0.02
-    # select main contract
-    main_mark = full_greek_caled_marked['main_mark'] >= 3
-    start_dt_mask = full_greek_caled_marked['dt'] >= start_dt
+    full_greek_caled_marked = load_full_greek_data(name='full_greek_caled_marked.parquet')
 
-    for dt, df in full_greek_caled_marked[main_mark & main_contract_mask & start_dt_mask].groupby('dt'):
-        if dt >= pd.to_datetime(start_dt):
-            # use 主力合约
-            ym_mask = df['ym'] == df['ym'].min()
-            selected = df[ym_mask]
+    ym_2_expire_func = partial(ym_to_expire_day, working_days=working_days)
 
-            otm_selected = selected[selected['OTM']]
-            otm_selected.index = otm_selected['contract_code']
-            otm_selected.index = otm_selected.index.astype(str)
-            # 这个设定为初始参数，方便快速配权
+    ym_2_expire_dict = dict(list(map(lambda x: (x, ym_2_expire_func(x)), full_greek_caled_marked['ym'].unique())))
 
-            op_portfolio = OptionPortfolioWithDT(otm_selected)
-            Delta, Gamma, Vega, Theta, Rho = op_portfolio.create_greek_matrix_all()
-            # res = OptBundle.run_opt(initial_weights, otm_selected, hedge_size, Delta, Gamma, Vega, Rho, method='SLSQP')
-            res = op_portfolio.run_opt(hedge_size, Delta, Gamma, Vega, Theta, Rho)
+    full_greek_caled_marked['expire_day'] = full_greek_caled_marked['ym'].replace(ym_2_expire_dict)
+    full_greek_caled_marked_60m['expire_day'] = full_greek_caled_marked_60m['ym'].replace(ym_2_expire_dict)
+    full_greek_caled_marked_60m_rd['expire_day'] = full_greek_caled_marked_60m_rd['ym'].replace(ym_2_expire_dict)
 
-            op_portfolio._selected['success'] = res.success
-            op_portfolio._selected['msg'] = res.message
+    lastdel_multi_hedge = pd.read_excel('lastdel_multi_hedge.xlsx')
 
-            if draw_pic:
-                draw_greek_surface_pic2(res, op_portfolio._selected, num_plots=6, num_cols=3, )
+    zz1000 = ak.stock_zh_index_daily(symbol="sh000852")
 
-    pass
+    quote = full_greek_caled_marked.pivot_table(index='dt', columns='contract_code', values='fee')
+    quote['000852.SH'] = zz1000.pivot_table(index='date', values='close')
+
+    zz1000_15m = pd.read_excel('zz1000_15m_v1.xlsx')
+    zz1000_60m = zz1000_15m.set_index('dt').resample("H").last().dropna()
+    zz1000_60m = zz1000_60m[['close']]
+    zz1000_60m.columns = ['000852.SH']
+
+    merged_quote_s4_matrix = pd.read_parquet('merged_quote_s4_matrix.parquet')
+    s22 = merged_quote_s4_matrix['bais_a_std40'].ffill()
+    upper = s22.rolling(4 * 125).std() * 1 + s22.rolling(4 * 125).median()
+
+
+    def strategy(dt_selected, hedge_size, min_put_level=3, max_cost=200):
+
+        cp_mask = dt_selected['cp'] == 'P'
+
+        fee_mask = dt_selected['fee'] <= max_cost
+        otm_mask = dt_selected['OTM']
+
+        c_mask = dt_selected['main_mark'] >= min_put_level
+
+        a_put = dt_selected[cp_mask & c_mask & fee_mask & otm_mask].sort_values('fee')  # .head(1)
+        if a_put.empty:
+            if min_put_level < dt_selected['main_mark'].max():
+                return strategy(dt_selected, hedge_size, min_put_level=min_put_level - 1, max_cost=max_cost)
+            else:
+                raise ValueError('no option available!')
+        else:
+
+            a_put['weight'] = np.round(hedge_size / a_put['Delta'] / 100 / a_put['f'],0)
+
+            less_100_mask = a_put['weight'] <= 100
+
+            if a_put[less_100_mask].empty:
+                return strategy(dt_selected, hedge_size, min_put_level=min_put_level + 1, max_cost=max_cost)
+
+            else:
+                return a_put[less_100_mask].head(1)
+
+
+    op1 = OptionPortfolio(full_greek_caled_marked_60m_rd)
+
+    op1.strategy = strategy
+
+    result = pd.concat(list(op1.mapping_strategy(hedge_size, min_put_level=4, max_cost=200)))
+    print(1)
+    # reduced_records = op1.records(reduce=False).reset_index(drop=True)
+    # # reduced_records
+    # reduced_records['报单日期'] = pd.to_datetime(reduced_records['报单日期']).dt.strftime('%Y%m%d')
+    # summary_ls_merged = op1.fast(reduced_records, quote, lastdel_multi_hedge)
+    # draw_pnl_pic(summary_ls_merged, title='Short Pure-Put PNL@500w')

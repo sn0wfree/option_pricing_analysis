@@ -120,14 +120,14 @@ class OptionPortfolioWithDT(object):
     def avaiable_main_put_contract(self):
         put_mask = self._selected['cp'] == 'P'
         main_mask = self._selected['main_mark'] != 0
-        #         avail_put = self.avaiable_put_contract
+        #         avail_put = self.available_put_contract
         return self.reduce_quote(self._selected[put_mask & main_mask])
 
     @property
     def avaiable_main_call_contract(self):
         call_mask = self._selected['cp'] == 'C'
         main_mask = self._selected['main_mark'] != 0
-        #         avail_put = self.avaiable_put_contract
+        #         avail_put = self.available_put_contract
         return self.reduce_quote(self._selected[call_mask & main_mask])
 
     @staticmethod
