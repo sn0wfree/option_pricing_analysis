@@ -22,6 +22,9 @@ from scipy.optimize import minimize, LinearConstraint
 from option_analysis_monitor import ProcessReport, DerivativesItem, ReportAnalyst, ProcessReportSingle
 import matplotlib.pyplot as plt
 
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置简黑字体
+plt.rcParams['axes.unicode_minus'] = False  # 解决‘-’bug
+
 
 def cal_greek_with_given_f(row, f, DividendYield=0):
     UnderlyingPrice = f
@@ -436,6 +439,92 @@ class OptionPortfolio(object):
         dd['报单日期'] = pd.to_datetime(dd['报单日期']).dt.strftime('%Y-%m-%d')
         return dd[target_cols]
 
+    @staticmethod
+    def long_side_trading_transaction(result, quote):
+        if not result.empty:
+            holding = result.pivot_table(index='dt', columns='contract_code', values='weight')
+
+            transaction = holding.fillna(0).diff(1).copy(deep=True)
+
+            transaction.loc[holding.index[0], :] = holding.loc[holding.index[0], :].fillna(0)
+            weight_chg = transaction.stack(-1).to_frame('weight_chg').reset_index()
+            weight_chg_reduce = weight_chg[weight_chg['weight_chg'] != 0]
+            fee = quote[['dt', 'contract_code', 'fee']]
+            merged = pd.merge(weight_chg_reduce, fee, left_on=['dt', 'contract_code'], right_on=['dt', 'contract_code'],
+                              how='left')
+            merged['委托合约'] = merged['contract_code']
+            merged['报单时间'] = merged['dt']
+            merged['报单日期'] = pd.to_datetime(merged['dt']).dt.strftime('%Y%m%d')
+            merged['买卖'] = (merged['weight_chg'] > 0) * 1
+            merged['买卖'] = merged['买卖'].replace({1: '买', 0: '卖'})
+            merged['开平'] = (merged['weight_chg'] > 0) * 1
+            merged['开平'] = merged['开平'].replace({1: '开', 0: '平'})
+            merged['手数'] = merged['weight_chg'].abs()
+            merged['成交均价'] = merged['fee']
+            merged['手续费'] = merged['手数'] * merged['成交均价'] * 100 * (0.00432 / 100)
+            merged['挂单状态'] = '全部成交'
+            merged['详细状态'] = '全部成交'
+            merged['成交号'] = 'hedge1'
+            merged['盈亏'] = 0
+            merged['未成交'] = 0
+            merged['remarks'] = 0
+            target_cols = ['报单日期', '委托合约', '手数', '未成交', '买卖', '开平', '成交均价', '挂单状态', '报单时间',
+                           '详细状态', '盈亏', '手续费', '成交号']
+
+            return holding, merged[target_cols]
+
+        else:
+            return None, None
+
+    @staticmethod
+    def short_side_trading_transaction(result, quote):
+
+        if not result.empty:
+            holding = result.pivot_table(index='dt', columns='contract_code', values='weight')
+
+            transaction = holding.fillna(0).diff(1).copy(deep=True)
+
+            transaction.loc[holding.index[0], :] = holding.loc[holding.index[0], :].fillna(0)
+            weight_chg = transaction.stack(-1).to_frame('weight_chg').reset_index()
+            weight_chg_reduce = weight_chg[weight_chg['weight_chg'] != 0]
+            fee = quote[['dt', 'contract_code', 'fee']]
+            merged = pd.merge(weight_chg_reduce, fee, left_on=['dt', 'contract_code'], right_on=['dt', 'contract_code'],
+                              how='left')
+            merged['委托合约'] = merged['contract_code']
+            merged['报单时间'] = merged['dt']
+            merged['报单日期'] = pd.to_datetime(merged['dt']).dt.strftime('%Y%m%d')
+            merged['买卖'] = (merged['weight_chg'] < 0) * 1
+            merged['买卖'] = merged['买卖'].replace({1: '卖', 0: '买'})
+            merged['开平'] = (merged['weight_chg'] < 0) * 1
+            merged['开平'] = merged['开平'].replace({1: '开', 0: '平'})
+            merged['手数'] = merged['weight_chg'].abs()
+            merged['成交均价'] = merged['fee']
+            merged['手续费'] = merged['手数'] * merged['成交均价'] * 100 * (0.00432 / 100)
+            merged['挂单状态'] = '全部成交'
+            merged['详细状态'] = '全部成交'
+            merged['成交号'] = 'hedge1'
+            merged['盈亏'] = 0
+            merged['未成交'] = 0
+            merged['remarks'] = 0
+            target_cols = ['报单日期', '委托合约', '手数', '未成交', '买卖', '开平', '成交均价', '挂单状态', '报单时间',
+                           '详细状态', '盈亏', '手续费', '成交号']
+
+            return holding, merged[target_cols]
+        else:
+            return None, None
+
+    @classmethod
+    def result_2_transactions(cls, result, quote):
+        long_mask = result['weight'] >= 0
+        short_mask = result['weight'] < 0
+
+        long_holding, long_transac = cls.long_side_trading_transaction(result[long_mask], quote)
+        short_holding, short_transac = cls.short_side_trading_transaction(result[short_mask], quote)
+
+        return pd.concat([long_holding, short_holding]), pd.concat([long_transac, short_transac])
+
+        pass
+
     @classmethod
     def _2_records(cls, dd):
         dd['weight'] = dd['weight'].fillna(0)
@@ -525,10 +614,17 @@ class OptionPortfolio(object):
         return transactions
 
     @classmethod
-    def parse_transactions_with_quote_v2(cls, transactions, quote, lastdel_multi,
+    def parse_transactions_with_quote_v3(cls, transactions, quote, lastdel_multi,
                                          trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, "买平今": -1, },
                                          ):
-        transactions = cls.create_transactions(transactions, lastdel_multi, reduced=False, return_df=True,
+
+        transactions['amt_100'] = transactions['手数'] * transactions['成交均价']
+        out = transactions.groupby(['委托合约', '买卖', '开平', '报单日期'])[['手数', 'amt_100']].sum().reset_index()
+        out['成交均价'] = out['amt_100'] / out['手数']
+        output_cols = ['委托合约', '买卖', '开平', '报单日期', '手数', '成交均价']
+        reduced_transactions = out[output_cols]
+
+        transactions = cls.create_transactions(reduced_transactions, lastdel_multi, reduced=False, return_df=True,
                                                trade_type_mark=trade_type_mark)
 
         result_holder = [
@@ -547,7 +643,7 @@ class OptionPortfolio(object):
     @classmethod
     def fast(cls, transactions, quote, lastdel_multi_hedge):
 
-        info_dict = cls.parse_transactions_with_quote_v2(transactions, quote, lastdel_multi_hedge.set_index('委托合约'))
+        info_dict = cls.parse_transactions_with_quote_v3(transactions, quote, lastdel_multi_hedge.set_index('委托合约'))
 
         commodity_contracts = transactions['委托合约'].unique().tolist()
         x_long_summary_info, x_short_summary_info = ReportAnalyst.create_summary_info(commodity_contracts,
@@ -560,8 +656,45 @@ class OptionPortfolio(object):
 
 
 class CachedData(object):
-    def __init__(self):
-        pass
+    @staticmethod
+    @file_cache(enable_cache=True, granularity='d', )
+    def get_data_with_cache(start_dt='2023-01-01', hedge_size=-500 * 10000):  # 设定对冲市值
+        tool_trade_date_hist_sina_df = ak.tool_trade_date_hist_sina()
+        working_days = pd.to_datetime(tool_trade_date_hist_sina_df['trade_date'])
+
+        #
+
+        draw_pic = False
+
+        full_greek_caled_marked_60m = load_full_greek_data(name='full_greek_caled_marked_rmed_60m.parquet')
+        full_greek_caled_marked_60m_rd = full_greek_caled_marked_60m[full_greek_caled_marked_60m['main_mark'] >= 1]
+
+        full_greek_caled_marked = load_full_greek_data(name='full_greek_caled_marked.parquet')
+
+        ym_2_expire_func = partial(ym_to_expire_day, working_days=working_days)
+
+        ym_2_expire_dict = dict(list(map(lambda x: (x, ym_2_expire_func(x)), full_greek_caled_marked['ym'].unique())))
+
+        full_greek_caled_marked['expire_day'] = full_greek_caled_marked['ym'].replace(ym_2_expire_dict)
+        full_greek_caled_marked_60m['expire_day'] = full_greek_caled_marked_60m['ym'].replace(ym_2_expire_dict)
+        full_greek_caled_marked_60m_rd['expire_day'] = full_greek_caled_marked_60m_rd['ym'].replace(ym_2_expire_dict)
+
+        lastdel_multi_hedge = pd.read_excel('lastdel_multi_hedge.xlsx')
+
+        zz1000 = ak.stock_zh_index_daily(symbol="sh000852")
+
+        quote = full_greek_caled_marked.pivot_table(index='dt', columns='contract_code', values='fee')
+        quote['000852.SH'] = zz1000.pivot_table(index='date', values='close')
+
+        zz1000_15m = pd.read_excel('zz1000_15m_v1.xlsx')
+        zz1000_60m = zz1000_15m.set_index('dt').resample("H").last().dropna()
+        zz1000_60m = zz1000_60m[['close']]
+        zz1000_60m.columns = ['000852.SH']
+
+        merged_quote_s4_matrix = pd.read_parquet('merged_quote_s4_matrix.parquet')
+        s22 = merged_quote_s4_matrix['bais_a_std40'].ffill()
+        upper = s22.rolling(4 * 125).std() * 1 + s22.rolling(4 * 125).median()
+        return working_days, full_greek_caled_marked_60m, full_greek_caled_marked_60m_rd, full_greek_caled_marked, ym_2_expire_dict, lastdel_multi_hedge, zz1000, quote, zz1000_60m, merged_quote_s4_matrix, s22, upper
 
     @staticmethod
     def load_quote_greek(select='select.parquet', main_mark=1):
@@ -880,11 +1013,34 @@ def ym_to_expire_day(ym: str, working_days, year_prefix='20'):
         return working_days[working_days >= day].head(1).dt.strftime('%Y-%m-%d').values[0]
 
 
+def draw_a_pic_quick(summary_ls_merged, title='期权组合损益@保护500w'):
+    # 创建一个图形和一组坐标轴
+    fig, ax = plt.subplots(figsize=(10, 6))
+    a1 = ax.plot(summary_ls_merged.index, summary_ls_merged['累计净损益(右轴)'], 'r-',
+                 label='期权组合损益')  # 'r-' 表示红色线
+    ax.set_ylabel(title)
+    ax.legend(prop={'size': 10})
+    # 创建次坐标轴
+    ax2 = ax.twinx()
+    # 设置次坐标轴的标签
+    ax2.set_ylabel('指数点位')
+
+    # 绘制次坐标轴上的数据
+
+    a2 = ax2.plot(summary_ls_merged.index, summary_ls_merged['zz1000'], 'b-', label='中证1000')  # 'b-' 表示蓝色线
+
+    # 添加图例
+    lines = [a1[0], a2[0]]
+    plt.legend(lines, ['期权组合损益', '中证1000'])
+    # 显示图形
+    plt.show()
+
+
 if __name__ == '__main__':
     # select one day
 
-    tool_trade_date_hist_sina_df = ak.tool_trade_date_hist_sina()
-    working_days = pd.to_datetime(tool_trade_date_hist_sina_df['trade_date'])
+    # tool_trade_date_hist_sina_df = ak.tool_trade_date_hist_sina()
+    # working_days = pd.to_datetime(tool_trade_date_hist_sina_df['trade_date'])
 
     #
     start_dt = '2023-01-01'
@@ -892,42 +1048,44 @@ if __name__ == '__main__':
     hedge_size = -500 * 10000  # 设定对冲市值
     draw_pic = False
 
-    full_greek_caled_marked_60m = load_full_greek_data(name='full_greek_caled_marked_rmed_60m.parquet')
-    full_greek_caled_marked_60m_rd = full_greek_caled_marked_60m[full_greek_caled_marked_60m['main_mark'] >= 1]
+    # full_greek_caled_marked_60m = load_full_greek_data(name='full_greek_caled_marked_rmed_60m.parquet')
+    # full_greek_caled_marked_60m_rd = full_greek_caled_marked_60m[full_greek_caled_marked_60m['main_mark'] >= 1]
+    #
+    # full_greek_caled_marked = load_full_greek_data(name='full_greek_caled_marked.parquet')
+    #
+    # ym_2_expire_func = partial(ym_to_expire_day, working_days=working_days)
+    #
+    # ym_2_expire_dict = dict(list(map(lambda x: (x, ym_2_expire_func(x)), full_greek_caled_marked['ym'].unique())))
+    #
+    # full_greek_caled_marked['expire_day'] = full_greek_caled_marked['ym'].replace(ym_2_expire_dict)
+    # full_greek_caled_marked_60m['expire_day'] = full_greek_caled_marked_60m['ym'].replace(ym_2_expire_dict)
+    # full_greek_caled_marked_60m_rd['expire_day'] = full_greek_caled_marked_60m_rd['ym'].replace(ym_2_expire_dict)
+    #
+    # lastdel_multi_hedge = pd.read_excel('lastdel_multi_hedge.xlsx')
+    #
+    # zz1000 = ak.stock_zh_index_daily(symbol="sh000852")
+    #
+    # quote = full_greek_caled_marked.pivot_table(index='dt', columns='contract_code', values='fee')
+    # quote['000852.SH'] = zz1000.pivot_table(index='date', values='close')
+    #
+    # zz1000_15m = pd.read_excel('zz1000_15m_v1.xlsx')
+    # zz1000_60m = zz1000_15m.set_index('dt').resample("H").last().dropna()
+    # zz1000_60m = zz1000_60m[['close']]
+    # zz1000_60m.columns = ['000852.SH']
+    #
+    # merged_quote_s4_matrix = pd.read_parquet('merged_quote_s4_matrix.parquet')
+    # s22 = merged_quote_s4_matrix['bais_a_std40'].ffill()
+    # upper = s22.rolling(4 * 125).std() * 1 + s22.rolling(4 * 125).median()
 
-    full_greek_caled_marked = load_full_greek_data(name='full_greek_caled_marked.parquet')
-
-    ym_2_expire_func = partial(ym_to_expire_day, working_days=working_days)
-
-    ym_2_expire_dict = dict(list(map(lambda x: (x, ym_2_expire_func(x)), full_greek_caled_marked['ym'].unique())))
-
-    full_greek_caled_marked['expire_day'] = full_greek_caled_marked['ym'].replace(ym_2_expire_dict)
-    full_greek_caled_marked_60m['expire_day'] = full_greek_caled_marked_60m['ym'].replace(ym_2_expire_dict)
-    full_greek_caled_marked_60m_rd['expire_day'] = full_greek_caled_marked_60m_rd['ym'].replace(ym_2_expire_dict)
-
-    lastdel_multi_hedge = pd.read_excel('lastdel_multi_hedge.xlsx')
-
-    zz1000 = ak.stock_zh_index_daily(symbol="sh000852")
-
-    quote = full_greek_caled_marked.pivot_table(index='dt', columns='contract_code', values='fee')
-    quote['000852.SH'] = zz1000.pivot_table(index='date', values='close')
-
-    zz1000_15m = pd.read_excel('zz1000_15m_v1.xlsx')
-    zz1000_60m = zz1000_15m.set_index('dt').resample("H").last().dropna()
-    zz1000_60m = zz1000_60m[['close']]
-    zz1000_60m.columns = ['000852.SH']
-
-    merged_quote_s4_matrix = pd.read_parquet('merged_quote_s4_matrix.parquet')
-    s22 = merged_quote_s4_matrix['bais_a_std40'].ffill()
-    upper = s22.rolling(4 * 125).std() * 1 + s22.rolling(4 * 125).median()
+    working_days, full_greek_caled_marked_60m, full_greek_caled_marked_60m_rd, full_greek_caled_marked, ym_2_expire_dict, lastdel_multi_hedge, zz1000, quote, zz1000_60m, merged_quote_s4_matrix, s22, upper = CachedData.get_data_with_cache(
+        start_dt='2023-01-01', hedge_size=-500 * 10000)
 
 
-    def strategy(dt_selected, hedge_size, min_put_level=3, max_cost=200):
+    def strategy(dt_selected, hedge_size, min_put_level=3, max_cost=200, single_max_weight=100):
 
         cp_mask = dt_selected['cp'] == 'P'
         fee_mask = dt_selected['fee'] <= max_cost
         otm_mask = dt_selected['OTM']
-
         c_mask = dt_selected['main_mark'] >= min_put_level
 
         a_put = dt_selected[cp_mask & c_mask & fee_mask & otm_mask].sort_values('fee')  # .head(1)
@@ -937,8 +1095,11 @@ if __name__ == '__main__':
             else:
                 raise ValueError('no option available!')
         else:
-            a_put['weight'] = np.round(hedge_size / a_put['Delta'] / 100 / a_put['f'], 0)
-            less_100_mask = a_put['weight'] <= 100
+
+
+            a_put['weight'] = np.round(hedge_size / a_put['Delta'] / 100 / a_put['f'], 0) * -1
+            less_100_mask = a_put['weight'].abs() <= single_max_weight
+
             if a_put[less_100_mask].empty:
                 return strategy(dt_selected, hedge_size, min_put_level=min_put_level + 1, max_cost=max_cost)
             else:
@@ -949,24 +1110,25 @@ if __name__ == '__main__':
 
     op1.strategy = strategy
 
-    result = pd.concat(list(op1.mapping_strategy(hedge_size, min_put_level=4, max_cost=200)))
 
-    dt_tick_60m = sorted(result['dt'].unique())
-    res_matrix = result.pivot_table(index='dt', columns='contract_code', values='weight')
+    result = pd.concat(list(op1.mapping_strategy(hedge_size, min_put_level=3, max_cost=200)))
 
-    w_diff = res_matrix.fillna(0).diff(1)
-    w_diff.loc[w_diff.index[0], :] = res_matrix.loc[w_diff.index[0], :]
+    holding, transaction = op1.result_2_transactions(result,
+                                                     full_greek_caled_marked_60m[['dt', 'contract_code', 'fee']])
 
-    t = w_diff.stack(-1).to_frame('weight').reset_index()
-    # for s, e in zip(dt_tick_60m[:-1], dt_tick_60m[1:]):
-    #     weight_matrix = result[(result['dt'] >= s) & (result['dt'] <= e)]
-    #     weight_matrix.diff(1)
-    print(2)
+    summary_ls_merged = op1.fast(transaction, quote, lastdel_multi_hedge)
 
-    # reduce result
+    draw_a_pic_quick(summary_ls_merged, title='期权组合损益@保护500w')
 
-    # reduced_records = op1.records(reduce=False).reset_index(drop=True)
-    # # reduced_records
-    # reduced_records['报单日期'] = pd.to_datetime(reduced_records['报单日期']).dt.strftime('%Y%m%d')
-    # summary_ls_merged = op1.fast(reduced_records, quote, lastdel_multi_hedge)
+
     # draw_pnl_pic(summary_ls_merged, title='Short Pure-Put PNL@500w')
+
+    with pd.ExcelWriter('output.xlsx') as f:
+        result.to_excel(f, 'result')
+        transaction.to_excel(f, 'transaction')
+        summary_ls_merged.to_excel(f, 'summary_ls_merged')
+
+    print(1)
+
+
+

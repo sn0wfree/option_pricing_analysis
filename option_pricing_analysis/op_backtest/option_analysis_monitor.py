@@ -1158,7 +1158,7 @@ class ProcessReportSingle(ProcessReportLoadingTools, ProcessReportDataTools):  #
     def prepare_transactions(transactions, trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, }):
         transactions['买卖开平'] = transactions['买卖'] + transactions['开平']
         transactions['trade_type'] = transactions['买卖开平'].replace(trade_type_mark)
-        transactions['trade_type'] = transactions['trade_type'].infer_objects(copy=False)
+        transactions['trade_type'] = transactions['trade_type'].infer_objects()
         transactions['unit'] = transactions['手数'] * transactions['CONTRACTMULTIPLIER']  # 添加合约乘数
         transactions['cost'] = transactions['unit'] * transactions['成交均价'] * transactions['trade_type']
         transactions['报单日期'] = pd.to_datetime(transactions['报单日期'], format='%Y%m%d')
@@ -1248,7 +1248,7 @@ class ProcessReport(ProcessReportSingle):
     def conct_and_rd_all_zero_rows_and_parse_more(long_cum_cost_df):
         mask = ~(long_cum_cost_df.fillna(0) == 0).all(axis=1)
         mask = mask.shift(-1).fillna(True)
-        mask = mask.infer_objects(copy=False)
+        mask = mask.infer_objects()
         df = long_cum_cost_df[mask]
         # df = df.index.dt.date
         return df
