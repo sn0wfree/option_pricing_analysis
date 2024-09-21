@@ -797,7 +797,7 @@ def _cal_portfolio_greek(weight, Delta, Gamma, Vega, Theta, Rho):
     return pd.concat([d, g, v, t, r], axis=1)
 
 
-def draw_greek_surface_pic2(res, selected, num_plots=6, num_cols=3,
+def draw_greek_surface_pic2(res, selected, Delta, Gamma, Vega, Theta, Rho, num_plots=6, num_cols=3,
                             greek_alphabet=('Delta', 'Gamma', 'Vega', 'Theta', 'Rho')):
     f = selected['f'].unique().tolist()[0]
     fee = np.dot(res.x, selected['fee'])
@@ -882,43 +882,6 @@ def ym_to_expire_day(ym: str, working_days, year_prefix='20'):
 
 if __name__ == '__main__':
     # select one day
-    # start_dt = '2023-01-01'
-    # hedge_size = -500 * 10000  # 设定对冲市值
-    # draw_pic = True
-    #
-    # full_greek_caled_marked = pd.read_parquet('full_greek_caled_marked.parquet')
-    # full_greek_caled_marked['OTM'] = ((full_greek_caled_marked['f'] - full_greek_caled_marked['k']) *
-    #                                   full_greek_caled_marked['cp'].replace({'C': -1, 'P': 1}).astype(int)) >= 0
-    #
-    # # 只选主力合约
-    # main_contract_mask = full_greek_caled_marked['t'] >= 0.02
-    # # select main contract
-    # main_mark = full_greek_caled_marked['main_mark'] >= 3
-    # start_dt_mask = full_greek_caled_marked['dt'] >= start_dt
-    #
-    # for dt, df in full_greek_caled_marked[main_mark & main_contract_mask & start_dt_mask].groupby('dt'):
-    #     if dt >= pd.to_datetime(start_dt):
-    #         # use 主力合约
-    #         ym_mask = df['ym'] == df['ym'].min()
-    #         selected = df[ym_mask]
-    #
-    #         otm_selected = selected[selected['OTM']]
-    #         otm_selected.index = otm_selected['contract_code']
-    #         otm_selected.index = otm_selected.index.astype(str)
-    #         # 这个设定为初始参数，方便快速配权
-    #
-    #         op_portfolio = OptionPortfolioWithDT(otm_selected)
-    #         Delta, Gamma, Vega, Theta, Rho = op_portfolio.create_greek_matrix_all()
-    #         # res = OptBundle.run_opt(initial_weights, otm_selected, hedge_size, Delta, Gamma, Vega, Rho, method='SLSQP')
-    #         res = op_portfolio.run_opt(hedge_size, Delta, Gamma, Vega, Theta, Rho)
-    #
-    #         op_portfolio._selected['success'] = res.success
-    #         op_portfolio._selected['msg'] = res.message
-    #
-    #         if draw_pic:
-    #             draw_greek_surface_pic2(res, op_portfolio._selected, num_plots=6, num_cols=3, )
-    #
-    # pass
 
     tool_trade_date_hist_sina_df = ak.tool_trade_date_hist_sina()
     working_days = pd.to_datetime(tool_trade_date_hist_sina_df['trade_date'])
@@ -962,7 +925,6 @@ if __name__ == '__main__':
     def strategy(dt_selected, hedge_size, min_put_level=3, max_cost=200):
 
         cp_mask = dt_selected['cp'] == 'P'
-
         fee_mask = dt_selected['fee'] <= max_cost
         otm_mask = dt_selected['OTM']
 
@@ -975,14 +937,10 @@ if __name__ == '__main__':
             else:
                 raise ValueError('no option available!')
         else:
-
-            a_put['weight'] = np.round(hedge_size / a_put['Delta'] / 100 / a_put['f'],0)
-
+            a_put['weight'] = np.round(hedge_size / a_put['Delta'] / 100 / a_put['f'], 0)
             less_100_mask = a_put['weight'] <= 100
-
             if a_put[less_100_mask].empty:
                 return strategy(dt_selected, hedge_size, min_put_level=min_put_level + 1, max_cost=max_cost)
-
             else:
                 return a_put[less_100_mask].head(1)
 
@@ -992,7 +950,21 @@ if __name__ == '__main__':
     op1.strategy = strategy
 
     result = pd.concat(list(op1.mapping_strategy(hedge_size, min_put_level=4, max_cost=200)))
-    print(1)
+
+    dt_tick_60m = sorted(result['dt'].unique())
+    res_matrix = result.pivot_table(index='dt', columns='contract_code', values='weight')
+
+    w_diff = res_matrix.fillna(0).diff(1)
+    w_diff.loc[w_diff.index[0], :] = res_matrix.loc[w_diff.index[0], :]
+
+    t = w_diff.stack(-1).to_frame('weight').reset_index()
+    # for s, e in zip(dt_tick_60m[:-1], dt_tick_60m[1:]):
+    #     weight_matrix = result[(result['dt'] >= s) & (result['dt'] <= e)]
+    #     weight_matrix.diff(1)
+    print(2)
+
+    # reduce result
+
     # reduced_records = op1.records(reduce=False).reset_index(drop=True)
     # # reduced_records
     # reduced_records['报单日期'] = pd.to_datetime(reduced_records['报单日期']).dt.strftime('%Y%m%d')

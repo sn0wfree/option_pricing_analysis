@@ -14,6 +14,7 @@ from op1 import OptionPortfolioWithDT
 from option_analysis_monitor import ProcessReport, DerivativesItem, ReportAnalyst, ProcessReportSingle
 import matplotlib.pyplot as plt
 from CodersWheel.QuickTool.boost_up import boost_up
+
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置简黑字体
 plt.rcParams['axes.unicode_minus'] = False  # 解决‘-’bug
 from CodersWheel.QuickTool.file_cache import file_cache
@@ -225,6 +226,7 @@ class FastRunBackTest2(FastRunBackTest):
         _selected.loc[w.index, 'weight'] = w.values[0]
         _selected.loc[a_lv2_call.index, 'weight'] = w.values[0]
         yield from cls.w_2_records(_selected.copy(deep=True), quote)
+
     @classmethod
     def f(cls, *args):
         return list(cls.put_call(*args))
@@ -256,7 +258,14 @@ class FastRunBackTest2(FastRunBackTest):
         mask = strategy_result['dt'].isin(dt_list)
 
         for dt, dd_selected in strategy_result[mask].groupby('dt'):
-            h.extend(list(cls.w_2_records(dd_selected, quote)))
+            dd_selected['weight'] = dd_selected['weight'].fillna(0)
+
+            dd_ = dd_selected[dd_selected['weight'] != 0]
+            if dd_.empty:
+                dd_selected['weight'] = dd_selected['put_weight'].fillna(0)
+                dd_ = dd_selected[dd_selected['weight'] != 0]
+
+            h.extend(list(cls.w_2_records(dd_, quote)))
 
         if len(h) == 0:
             return None
@@ -343,6 +352,7 @@ def my_function():
 
     transactions = FastRunBackTest2.create_transactions_by_strategy_result_v3(strategy_result, hedge_size,
                                                                               sub_full_greek_caled_marked_60m, signal, )
+    print(transactions)
 
     # summary_ls_merged = FastRunBackTest.fast(transactions, quote, lastdel_multi_hedge)
 
