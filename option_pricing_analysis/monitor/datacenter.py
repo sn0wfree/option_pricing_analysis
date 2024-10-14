@@ -13,6 +13,8 @@ from CodersWheel.QuickTool.retry_it import conn_try_again
 from fastapi import FastAPI  # 1. 导入 FastAPI
 from fastapi.responses import Response
 
+DEFAULT_CACHE_TIMEOUT_IDX=30
+DEFAULT_CACHE_TIMEOUT_OP=DEFAULT_CACHE_TIMEOUT_IDX
 
 class Tools(object):
     @staticmethod
@@ -64,6 +66,7 @@ class Tools(object):
 
 class AKQuoteFunctions(object):
     @staticmethod
+    @Tools.lru_cache(timeout=DEFAULT_CACHE_TIMEOUT_IDX)
     def ak_idx_quote(symbol="000852", period="1", start_date="2023-12-11 09:30:00", ):
         index_zh_a_hist_min_em_df = ak.index_zh_a_hist_min_em(symbol=symbol, period=period, start_date=start_date,
                                                               end_date=datetime.datetime.now().strftime(
@@ -410,7 +413,7 @@ class DelayFutOptionQuote(object):
         return call[col_order].rename(columns=cols)
 
     @classmethod
-    # @file_cache(enable_cache=True, granularity='H')
+    @Tools.lru_cache(timeout=DEFAULT_CACHE_TIMEOUT_OP)
     def t_trading_board(cls, symbol='mo', end_month="2408"):
         option_finance_board_df = cls.get_all_single_ym_symbol_op_quote(symbol=symbol, end_month=end_month)
 
@@ -455,7 +458,7 @@ class API(object):
 
     @staticmethod
     @app.get("/ak/idx/{code}/{period}")
-    def get_idx_quote_ak(code: str, period: str, q: Union[str, None] = None):
+    async def get_idx_quote_ak(code: str, period: str, q: Union[str, None] = None):
         """
         获取指数分钟行情
         :param code:
@@ -474,7 +477,7 @@ class API(object):
 
     @staticmethod
     @app.get("/ak/op/{symbol}/{ym}")
-    def get_op_quote_ak(symbol: str, ym: str, q: Union[str, None] = None):
+    async def get_op_quote_ak(symbol: str, ym: str, q: Union[str, None] = None):
         """
         获取期权截面行情
         :param symbol:
