@@ -588,12 +588,14 @@ class DerivativeSummary(ReportAnalyst):
     def auto_run(self, output_config,
                  quote_start_with='2022-06-04', version='v4',
                  trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, "买平今": -1, },
-                 cost_dict={'gr': 10000000, 'wj': 30000000, 'll': 30000000}):
+                 cost_dict={'gr': 10000000, 'wj': 30000000, 'll': 30000000},
+                 today=datetime.datetime.today(),
+                 ):
         #
 
         # config = Configs(conf_file=conf_file)
 
-        today = datetime.datetime.today()
+        today = datetime.datetime.today() if today is None else today
         # today_str = pd.to_datetime(today).strftime('%Y%m%d')
 
         contracts = self.reduced_contracts()
@@ -601,10 +603,12 @@ class DerivativeSummary(ReportAnalyst):
         # ---------------------------
 
         quote = self.get_quote_and_info(contracts, wh, start_with=quote_start_with)
+        # reduce quote
+        quote_rd = quote[quote.index <= today]
 
         lastdel_multi = self.get_info_last_delivery_multi(contracts, wh)
 
-        info_dict = self.parse_transactions_with_quote_v2(quote, lastdel_multi,
+        info_dict = self.parse_transactions_with_quote_v2(quote_rd, lastdel_multi,
                                                           trade_type_mark=trade_type_mark)
 
         person_holder_dict, merged_summary_dict, contract_summary_dict = self.group_by_summary(info_dict,
@@ -615,7 +619,7 @@ class DerivativeSummary(ReportAnalyst):
         person_by_year_summary, person_cum_sub, commodity_cum_sub, holding_summary_merged_sorted, contract_by_ls_summary = self.output_v2(
             info_dict, lastdel_multi, output_config, dt=today, trade_type_mark=trade_type_mark)
 
-        store_path = self.create_daily_summary_file_path(output_path='./', version=version)
+        store_path = self.create_daily_summary_file_path(output_path='./', version=version, today=today)
 
         with pd.ExcelWriter(store_path) as f:
             person_by_year_summary.to_excel(f, sheet_name='person_by_year_summary')
@@ -676,6 +680,8 @@ if __name__ == '__main__':
 
     config = Configs()
 
+    today = datetime.datetime.today()  # datetime.datetime(2024, 10, 9)  #
+
     PR = DerivativeSummary(
         report_file_path=config['report_file_path'],
         contract_2_person_rule=config['contract_2_person_rule'])
@@ -683,7 +689,10 @@ if __name__ == '__main__':
     PR.auto_run(config['output_config'], quote_start_with='2022-06-04', trade_type_mark={"卖开": 1, "卖平": -1,
                                                                                          "买开": 1, "买平": -1,
                                                                                          "买平今": -1, },
-                version=version, cost_dict=config['cost_dict'])
+                version=version, cost_dict=config['cost_dict'],
+
+                today=today
+                )
 
     # from upload import UploadDailyInfo
     #
@@ -700,5 +709,3 @@ if __name__ == '__main__':
     #                traders=config['output_config']['汇总'], db=None, sql_dict=config['sql_dict'], reduce=False)
 
     pass
-
-

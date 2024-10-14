@@ -11,10 +11,11 @@ class DataQuoteCK(object):
         self._conn = BaseSingleFactorTableNode(src)
         pass
 
-    def get_quote(self, code_prefix='MO'):
-        pass
+    def get_quote_via_sql(self, sql: str):
+        return self._conn(sql)
 
-    def get_mo_quote(self, code_prefix='MO'):
+    def get_mo_60m_quote_all(self, sql='select * from tick_minute_trade.MO_60m_trade'):
+        return self.get_quote_via_sql(sql)
         pass
 
 
@@ -34,9 +35,10 @@ class GSMain(object):
     pass
 
 
-class Portfolio(object):
-    pass
-
 
 if __name__ == '__main__':
+    DQCK = DataQuoteCK(src='clickhouse://default:Imsn0wfree@10.67.20.52:8123/system')
+
+    MO_60m_trade = DQCK.get_mo_60m_quote_all(sql='select * from tick_minute_trade.MO_60m_trade limit 10')
+    print(1)
     pass

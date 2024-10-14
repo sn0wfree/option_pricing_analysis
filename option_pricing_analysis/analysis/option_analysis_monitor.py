@@ -1315,13 +1315,16 @@ class ProcessReport(ProcessReportSingle):
     def parse_transactions_with_quote_v2(self, quote, lastdel_multi,
                                          trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, "买平今": -1, },
                                          ):
+
         transactions = self.create_transactions(lastdel_multi, reduced=True, return_df=True,
                                                 trade_type_mark=trade_type_mark)
+
+        given_dt_mask = transactions['报单日期'] <= quote.index.max()
 
         result_holder = [
             DerivativesItem.parse_bo2sc_so2pc(lastdel_multi, contract, sub_transaction, quote, return_dict=False) for
             contract, sub_transaction in
-            transactions.groupby('委托合约')
+            transactions[given_dt_mask].groupby('委托合约')
         ]
 
         l1, l2, l3, l4, l5, l6, s1, s2, s3, s4, s5, s6 = list(zip(*result_holder))
@@ -1495,30 +1498,31 @@ class SummaryFunctions(object):
 
             # result = filter(None,map(lambda x: re.compile(x).match(contract),contract_2_person_rule.keys() ))
             alternative = []
-            for pattern, person in contract_2_person_rule.items():
+            for pattern, person in contract_2_person_rule.items():  # 遍历所有规则，把所有匹配的规则放入alternative中
 
                 if re.compile(pattern).match(contract):
                     code_pattern = contract == pattern
                     alternative.append((code_pattern, person))
 
-            if len(alternative) == 1:
+            if len(alternative) == 1:  # 判断只有一个规则match，则匹配的人就是最终的结果
                 person = alternative[0][-1]
                 yield contract, person, con_type, commodity_type
-            elif len(alternative) > 1:
-                for code_pattern, person in alternative:
-                    if code_pattern:
+            elif len(alternative) > 1:  # 如果存在多个结果
+                for code_pattern, person in alternative:  # 遍历结果
+                    if code_pattern:  # 如果是代码匹配，就返回，由于是字典结构，代码匹配只可能出现一次
                         yield contract, person, con_type, commodity_type
+                        break
                 else:
                     raise ValueError(f'got multi-regex({len(alternative)}) rules on {contract}:{alternative}')
             else:
-                yield contract, None, con_type, commodity_type
+                yield contract, None, con_type, commodity_type  # 如果匹配规则中为空，就返回空人
 
     @staticmethod
-    def create_daily_summary_file_path(output_path='./', version='v2'):
+    def create_daily_summary_file_path(output_path='./', version='v2', today=datetime.datetime.today()):
         if output_path is None:
             output_path = './'
 
-        today_str = pd.to_datetime(datetime.datetime.today()).strftime('%Y%m%d')
+        today_str = pd.to_datetime(today).strftime('%Y%m%d')
 
         output_name_format = f'日度衍生品交易收益率统计及汇总@{today_str}{version}.xlsx'
 
@@ -1700,7 +1704,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
                                                                                     groupby='commodity')
 
         person_holder_dict = self.groupby_person_summary(info_dict,
-                                                         person_link_df, groupby='person',cost_dict=cost_dict)
+                                                         person_link_df, groupby='person', cost_dict=cost_dict)
 
         # 分人
 
