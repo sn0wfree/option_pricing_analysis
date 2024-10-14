@@ -56,7 +56,7 @@ def query(url):
 class QuoteHolder(object):
     @staticmethod
     @timer
-    def get_op_quote_via_cffex(symbol='mo', end_month="2410", drop_ym=True, base_host_port='47.104.186.157:3100'):
+    def get_op_quote_via_cffex(symbol='mo', end_month="ALL", drop_ym=True, base_host_port='47.104.186.157:3100'):
         url = f'http://{base_host_port}/ak/op/{symbol}/{end_month}'
         # 获取行情数据
         t_trading_board = query(url)

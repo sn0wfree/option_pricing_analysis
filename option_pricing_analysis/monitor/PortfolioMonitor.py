@@ -21,9 +21,9 @@ class PortfolioMonitor(OptionMonitorUI):
         self.setup_grid(rows=1, columns=1)
         ## top_left_frame
         # 获取行情数据
-        t_trading_board = quote_obj.get_op_quote_via_cffex(symbol='mo', end_month="2410")
+        t_trading_board = quote_obj.get_op_quote_via_cffex(symbol='mo', end_month="ALL")
 
-        realtime_idx = quote_obj.get_idx_quote_via_ak()
+        realtime_idx = quote_obj.get_idx_minute_quote_via_ak()
 
         self.market_display(t_trading_board, realtime_idx, row=0, column=0, height=50, width=300)
 
