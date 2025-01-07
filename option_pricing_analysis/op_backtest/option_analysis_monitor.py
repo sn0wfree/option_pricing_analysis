@@ -1751,7 +1751,7 @@ class ReportAnalyst(ProcessReport, SummaryFunctions):
 
 
 class Configs(object):
-    def __init__(self, conf_file='config.yml'):
+    def __init__(self, conf_file='op_config.yml'):
         full_path = detect_file_full_path(conf_file=conf_file)
         with open(full_path, 'r', encoding="utf-8") as f:
             self.config = yaml.load(f.read(), Loader=yaml.FullLoader)

@@ -15,6 +15,8 @@ import yaml
 from CodersWheel.QuickTool.detect_file_path import detect_file_full_path
 from CodersWheel.QuickTool.file_cache import file_cache
 
+from option_pricing_analysis.analysis.quote_cache_sqlite import sqlite_cache
+
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 
@@ -28,7 +30,44 @@ class WindHelper(object):
         w.start()
         self.w = w
 
-    @file_cache(enable_cache=True, granularity='d')
+    # @staticmethod
+    # def _cache_sqlite_deco(store='./quote._cache.sqlite'):
+    #     """
+    #     dt,field_value,field_name
+    #
+    #     use code as table name
+    #
+    #
+    #     :param code:
+    #     :param start:
+    #     :param end:
+    #     :param col:
+    #     :param store:
+    #     :return:
+    #     """
+    #
+    #     # check code exists
+    #     holding_sql = "SELECT name FROM sqlite_master WHERE type='table' ;"
+    #
+    #     sql = 'select * from Holding where time == (select max(time) from Holding) order by time desc'
+    #
+    #     with sqlite3.connect(store) as conn:
+    #         code_list = pd.read_sql(holding_sql, conn)['name'].unique()
+    #
+    #     def _deco(func):
+    #
+    #         def __deco(*args,**kwargs):
+    #             args[0]
+    #             existence = code in code_list
+    #
+    #
+    #         if not existence:
+    #             df = self.get_data(code, start, end, fields)
+    #             return df
+    #
+    #     pass
+
+    @sqlite_cache(enable_cache=True, store_path='quote_cache.sqlite')
     def get_data(self, code, start, end, fields):
         """
         Generic method to fetch data from the Wind database.
@@ -39,7 +78,8 @@ class WindHelper(object):
         :param fields: The fields to retrieve (e.g., 'close', 'high').
         :return: DataFrame with the requested data.
         """
-        error, data_frame = self.w.wsd(code, fields, start, end, "", usedf=True)
+        error, data_frame = file_cache(enable_cache=True, granularity='d')(self.w.wsd)(code, fields, start, end, "",
+                                                                                       usedf=True)
         if error != 0:
             raise ValueError(f"Wind API error: {error}")
         return data_frame
@@ -97,6 +137,7 @@ class WindHelper(object):
 
         return df
 
+    @file_cache(enable_cache=True, granularity='d')
     def wind_wsd_quote_reduce(self, code: str, start: str, end: str, required_cols=('close', 'volume')):
         df = self.wind_wsd_quote(code, start, end, required_cols=required_cols)
         return df
@@ -116,7 +157,7 @@ class WindHelper(object):
         :return: DataFrame with future information.
         """
         if code_list is None:
-            code_list = ["IF2312.CFE"]
+            code_list = ["IM2412.CFE"]
 
         cols_str = ",".join(date_fields + multiplier_fields + underlying_code + futures_margin).lower()
         # "ftdate_new,startdate,lastdelivery_date,exe_enddate,contractmultiplier"
@@ -1061,6 +1102,9 @@ class ProcessReportDataTools(object):
             q = wind_helper.wind_wsd_quote_reduce(contract, start, end, required_cols=('close',)).dropna()[
                 'CLOSE'].to_frame(contract)
             q.index.name = 'date'
+
+            q.index = pd.to_datetime(q.index)
+
             yield q
             got.append(contract)
 
@@ -1068,10 +1112,12 @@ class ProcessReportDataTools(object):
         for underlying in lastdeliv_and_multi['UNDERLYINGWINDCODE'].dropna().unique():
             if underlying not in got:
                 q = \
-                    wind_helper.wind_wsd_quote_reduce(underlying, min_start_dt, today,
+                    wind_helper.wind_wsd_quote_reduce(underlying, pd.to_datetime(min_start_dt).strftime("%Y-%m-%d"),
+                                                      today.strftime("%Y-%m-%d"),
                                                       required_cols=('close',)).dropna()[
                         'CLOSE'].to_frame(underlying)
                 q.index.name = 'date'
+                q.index = pd.to_datetime(q.index)
                 yield q
 
     @classmethod
@@ -1079,8 +1125,9 @@ class ProcessReportDataTools(object):
 
         h = cls.get_quote_iter(lastdeliv_and_multi, wind_helper, today=today, min_start_dt=min_start_dt)
 
-        quote = pd.concat(h, axis=1).sort_index()
+        quote = pd.concat(h, axis=1)
         quote.index = pd.to_datetime(quote.index)
+        quote = quote.sort_index().drop_duplicates()
 
         return quote
 
@@ -1183,7 +1230,10 @@ class ProcessReport(ProcessReportSingle):
                                          'AG\d{4}.SHF': 'gr',
                                          'AU\d{4}.SHF': 'wj',
                                          'CU\d{4}.SHF': 'wj',
-                                         'AL\d{4}.SHF': 'gr'}, **kwargs):
+                                         'AL\d{4}.SHF': 'gr'},
+
+                 end_dt=datetime.datetime.today(),
+                 **kwargs):
         rule = dict([k.split('.') for k in contract_2_person_rule.keys()])
 
         _parsed_report = self.load_report(report_file_path,
@@ -1197,6 +1247,8 @@ class ProcessReport(ProcessReportSingle):
         super().__init__(None, _parsed_report, name_process_rule=rule)
         self.contract_2_person_rule = contract_2_person_rule
 
+        self._end_dt = end_dt
+
     def create_transactions(self, last_deliv_and_multi,
                             trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, },
                             reduced=False, return_df=False, ):
@@ -1209,7 +1261,9 @@ class ProcessReport(ProcessReportSingle):
 
         transactions = self.prepare_transactions(merged_transactions, trade_type_mark=trade_type_mark)
 
-        return transactions if return_df else DerivativesItemHolder(transactions)
+        transactions_rd = transactions[transactions['报单日期'] <= self._end_dt]
+
+        return transactions_rd if return_df else DerivativesItemHolder(transactions_rd)
 
     def create_current_cost_price(self, lastdel_multi,
                                   trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, },
@@ -1238,7 +1292,7 @@ class ProcessReport(ProcessReportSingle):
         res_avg_price_df = pd.merge(avg_price_df,
                                     lastdel_multi[['EXE_DATE', 'CONTRACTMULTIPLIER', 'MARGIN']].reset_index(),
                                     left_on=['contract_code'], right_on=['委托合约'], how='left').drop_duplicates()
-        res_avg_price_rd_df = res_avg_price_df[res_avg_price_df['EXE_DATE'] >= datetime.datetime.today()]
+        res_avg_price_rd_df = res_avg_price_df[res_avg_price_df['EXE_DATE'] >= self._end_dt]
         # contract_list = res_avg_price_rd_df['contract_code'].unique()
         # contract_mask = res_avg_price_rd_df['contract_code'].isin(contract_list)
 

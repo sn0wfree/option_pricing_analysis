@@ -2,6 +2,7 @@ import datetime
 import os
 
 import pandas as pd
+from CodersWheel.QuickTool.timer import timer
 
 from option_pricing_analysis.analysis.option_analysis_monitor import WindHelper, ReportAnalyst, Configs, Tools
 
@@ -449,19 +450,32 @@ class DerivativeSummary(ReportAnalyst):
 
         return hld_contracts_mgd
 
-    #     if contract_type == 'Future':
-    #         return hld_contracts_mgd['保证金数字调整系数'] * hld_contracts_mgd['MARGIN'] * hld_contracts_mgd['持仓手数'] \
-    #             * hld_contracts_mgd['CONTRACTMULTIPLIER'] * hld_contracts_mgd['平均开仓成本']
-    #     elif contract_type == 'Option':
-    #         return hld_contracts_mgd['保证金数字调整系数'] * hld_contracts_mgd['MARGIN'] * hld_contracts_mgd['持仓手数']
-    #     else:
-    #         return None
-    #
+    @classmethod
+    def cal_cal_hld_contract_margin_with_no_traded(cls, res_avg_price_rd_df, hld_contracts_smy_mrgd):
+        holding_contracts_summary_margin_added = hld_contracts_smy_mrgd.copy(deep=True)
+        holding_contracts_summary_margin_added['平均开仓成本'] = None
+        holding_contracts_summary_margin_added['CONTRACTMULTIPLIER'] = None
+        holding_contracts_summary_margin_added['MARGIN'] = None
+        holding_contracts_summary_margin_added['持仓方向'] = None
+
+        holding_contracts_summary_margin_added['持仓名义市值'] = None
+
+        holding_contracts_summary_margin_added.index = hld_contracts_smy_mrgd.index
+        holding_contracts_summary_margin_added['保证金数字调整系数'] = cls._add_margin_adj(
+            holding_contracts_summary_margin_added,
+            future_margin_adj=1 / 100,
+            short_op_margin_adj=-1)
+        return holding_contracts_summary_margin_added
+
     @classmethod
     def cal_hld_contract_margin(cls, res_avg_price_rd_df, hld_contracts_smy_mrgd):
+        ## 当所有人空仓的时候如何会报错,需要提前过滤
+
         holding_contracts_summary_margin_added = pd.merge(hld_contracts_smy_mrgd,
                                                           res_avg_price_rd_df[
-                                                              ['contract_code', '平均开仓成本', 'CONTRACTMULTIPLIER',
+                                                              ['contract_code',
+                                                               '平均开仓成本',
+                                                               'CONTRACTMULTIPLIER',
                                                                'MARGIN',
                                                                '持仓方向']],
                                                           left_on=['contract', '持仓方向'],
@@ -570,21 +584,43 @@ class DerivativeSummary(ReportAnalyst):
                                                              dt_col='报单日期时间',
                                                              method=method)
         ##  合并且添加计算保证金
-        hld_contracts_smy_mrgd2 = self.cal_hld_contract_margin(res_avg_price_rd_df, hld_contracts_smy_mrgd)
+        if not res_avg_price_rd_df.empty:
+            hld_contracts_smy_mrgd2 = self.cal_hld_contract_margin(res_avg_price_rd_df, hld_contracts_smy_mrgd)
 
-        ## add 现价
+            ## add 现价
 
-        hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['持仓名义市值'] / (
-                hld_contracts_smy_mrgd2['持仓手数'] * hld_contracts_smy_mrgd2['CONTRACTMULTIPLIER'])
+            hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['持仓名义市值'] / (
+                    hld_contracts_smy_mrgd2['持仓手数'] * hld_contracts_smy_mrgd2['CONTRACTMULTIPLIER'])
 
-        hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['现价'].abs()
+            hld_contracts_smy_mrgd2['现价'] = hld_contracts_smy_mrgd2['现价'].abs()
 
-        holding_contracts_summary_merged_sorted = hld_contracts_smy_mrgd2[
-            target_cols + sorted(set(year_cols))]
-        holding_contracts_summary_merged_sorted.index.names = ['交易员', '统计维度']
+            holding_contracts_summary_merged_sorted = hld_contracts_smy_mrgd2[
+                target_cols + sorted(set(year_cols))]
+            holding_contracts_summary_merged_sorted.index.names = ['交易员', '统计维度']
+
+
+
+        else:
+            hld_contracts_smy_mrgd2 = self.cal_cal_hld_contract_margin_with_no_traded(res_avg_price_rd_df,
+                                                                                      hld_contracts_smy_mrgd)
+            hld_contracts_smy_mrgd2['现价'] = None
+            hld_contracts_smy_mrgd2['持仓手数'] = None
+            hld_contracts_smy_mrgd2['持仓方向'] = None
+
+            hld_contracts_smy_mrgd2['平仓价值'] = None
+            hld_contracts_smy_mrgd2['行权价值'] = None
+            hld_contracts_smy_mrgd2['保证金占用'] = None
+
+            holding_contracts_summary_merged_sorted = hld_contracts_smy_mrgd2[
+                target_cols + sorted(set(year_cols))].dropna(axis=1)
+            holding_contracts_summary_merged_sorted.index.names = ['交易员', '统计维度']
+
+        if '持仓方向' not in holding_contracts_summary_merged_sorted.columns:
+            holding_contracts_summary_merged_sorted['持仓方向'] = None
 
         return person_by_year_summary, person_cum_sub, comm_cum_sub, holding_contracts_summary_merged_sorted, contract_by_ls_summary
 
+    @timer
     def auto_run(self, output_config,
                  quote_start_with='2022-06-04', version='v4',
                  trade_type_mark={"卖开": 1, "卖平": -1, "买开": 1, "买平": -1, "买平今": -1, },
@@ -605,6 +641,8 @@ class DerivativeSummary(ReportAnalyst):
         quote = self.get_quote_and_info(contracts, wh, start_with=quote_start_with)
         # reduce quote
         quote_rd = quote[quote.index <= today]
+        # check 行情是否更新
+        # quote_rd[quote_rd.index ==today]
 
         lastdel_multi = self.get_info_last_delivery_multi(contracts, wh)
 
@@ -680,17 +718,18 @@ if __name__ == '__main__':
 
     config = Configs()
 
-    today = datetime.datetime.today()  # datetime.datetime(2024, 10, 9)  #
+    today = datetime.datetime.today()  # datetime.datetime(2024, 12, 30)  #
 
     PR = DerivativeSummary(
         report_file_path=config['report_file_path'],
-        contract_2_person_rule=config['contract_2_person_rule'])
+        contract_2_person_rule=config['contract_2_person_rule'],
+        end_dt=today,
+    )
 
     PR.auto_run(config['output_config'], quote_start_with='2022-06-04', trade_type_mark={"卖开": 1, "卖平": -1,
                                                                                          "买开": 1, "买平": -1,
                                                                                          "买平今": -1, },
                 version=version, cost_dict=config['cost_dict'],
-
                 today=today
                 )
 

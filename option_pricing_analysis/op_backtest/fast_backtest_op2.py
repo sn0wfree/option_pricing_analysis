@@ -13,7 +13,7 @@
 #
 # from collections import ChainMap
 #
-# from CodersWheel.QuickTool.file_cache import file_cache
+# from CodersWheel.QuickTool.sqlite_cache import sqlite_cache
 #
 # from option_analysis_monitor import ProcessReport, DerivativesItem, ReportAnalyst, ProcessReportSingle
 #

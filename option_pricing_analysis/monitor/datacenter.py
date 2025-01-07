@@ -2,9 +2,10 @@
 import datetime
 import functools
 import io
+import sqlite3
 import time
 from io import BytesIO
-from typing import Union
+from typing import Union, List
 
 import akshare as ak
 import pandas as pd
@@ -12,9 +13,21 @@ import requests
 from CodersWheel.QuickTool.retry_it import conn_try_again
 from fastapi import FastAPI  # 1. 导入 FastAPI
 from fastapi.responses import Response
+from pydantic import BaseModel
 
-DEFAULT_CACHE_TIMEOUT_IDX=30
-DEFAULT_CACHE_TIMEOUT_OP=DEFAULT_CACHE_TIMEOUT_IDX
+DEFAULT_CACHE_TIMEOUT_IDX = 30
+DEFAULT_CACHE_TIMEOUT_OP = DEFAULT_CACHE_TIMEOUT_IDX
+
+currt_hour = datetime.datetime.now().hour
+trading_period = (currt_hour >= 9 and currt_hour <= 11) or (currt_hour >= 13 and currt_hour <= 15)
+use_cache = ~trading_period
+
+
+# 定义一个 Pydantic 模型来解析传入的 JSON 数据
+# 假设你的 DataFrame 是一个简单的列表字典
+class PositionItem(BaseModel):
+    Data: List[dict]
+
 
 class Tools(object):
     @staticmethod
@@ -376,7 +389,7 @@ class DelayFutOptionQuote(object):
         return option_cffex_op_list_sina_df[key]
 
     @staticmethod
-    # @file_cache(enable_cache=True, granularity='M')
+    # @sqlite_cache(enable_cache=True, granularity='M')
     @conn_try_again(max_retries=5, default_retry_delay=1, expect_error=Exception)
     def get_all_single_ym_symbol_op_quote(symbol='mo', end_month="2408",
                                           symbol_2_board_symbol_dic=symbol_2_board_symbol_dict):
@@ -413,8 +426,7 @@ class DelayFutOptionQuote(object):
         return call[col_order].rename(columns=cols)
 
     @classmethod
-    @Tools.lru_cache(timeout=DEFAULT_CACHE_TIMEOUT_OP)
-    def t_trading_board(cls, symbol='mo', end_month="2408"):
+    def _op_quote_no_board(cls, symbol='mo', end_month="2408"):
         option_finance_board_df = cls.get_all_single_ym_symbol_op_quote(symbol=symbol, end_month=end_month)
 
         option_finance_board_df['pct'] = option_finance_board_df['updown'] / (
@@ -427,6 +439,24 @@ class DelayFutOptionQuote(object):
         s_ym_d_k['instrument'] = option_finance_board_df['instrument']
 
         merged_op_quote = pd.merge(s_ym_d_k, option_finance_board_df, left_on=['instrument'], right_on=['instrument'])
+
+        return merged_op_quote
+
+    @classmethod
+    @Tools.lru_cache(timeout=DEFAULT_CACHE_TIMEOUT_OP)
+    def t_trading_board(cls, symbol='mo', end_month="2408"):
+        # option_finance_board_df = cls.get_all_single_ym_symbol_op_quote(symbol=symbol, end_month=end_month)
+        #
+        # option_finance_board_df['pct'] = option_finance_board_df['updown'] / (
+        #         option_finance_board_df['lastprice'] - option_finance_board_df['updown'])
+        #
+        # option_finance_board_df['pct'] = option_finance_board_df['pct'].round(4)
+        #
+        # ym_d_k = option_finance_board_df['instrument'].apply(lambda x: x.split('-'))
+        # s_ym_d_k = pd.DataFrame(ym_d_k.values.tolist(), columns=['symbol_ym', 'direct', 'k'])
+        # s_ym_d_k['instrument'] = option_finance_board_df['instrument']
+
+        merged_op_quote = cls._op_quote_no_board(symbol=symbol, end_month=end_month)
 
         call = merged_op_quote[merged_op_quote['direct'] == 'C']
         renamed_call = cls.rename_df(call, direct='看涨')
@@ -447,6 +477,57 @@ class DelayFutOptionQuote(object):
 
 
 app = FastAPI()  # 2. 创建一个 FastAPI 实例
+
+
+class PositionHelper(object):
+
+    @staticmethod
+    def code_type_detect(code, pattern_rule_dict={'Future': r'^[A-Z]{2}\d{4}\.\w{3}$',
+                                                  'Option': r'^[A-Z]+[0-9]+-[CP]-[0-9]+\.\w+$', }
+                         ):
+        """
+        Detects the type of a given financial code based on the provided pattern rules.
+
+        Args:
+        code (str): The financial code to be detected.
+        pattern_rule_dict (dict): The dictionary containing pattern rules for different code types.
+                                Default value contains rules for 'Future' and 'Option' codes.
+
+        Returns:
+        str: The type of the financial code ('Future', 'Option', or 'Unknown').
+        """
+        import re
+        for name, pattern_str in pattern_rule_dict.items():
+            if re.compile(pattern_str).match(code):
+                return name
+            elif re.compile(pattern_str.replace('+-', '+').replace(']-', ']')).match(code):
+                return name
+        else:
+            return 'Unknown'
+
+    @staticmethod
+    def option_type_detect(code, pattern_rule_dict={'Option-Put': r'^[A-Z]+[0-9]+-[P]-[0-9]+\.\w+$',
+                                                    'Option-Call': r'^[A-Z]+[0-9]+-[C]-[0-9]+\.\w+$', }
+                           ):
+        """
+        Detects the type of a given financial code based on the provided pattern rules.
+
+        Args:
+        code (str): The financial code to be detected.
+        pattern_rule_dict (dict): The dictionary containing pattern rules for different code types.
+                                Default value contains rules for 'Future' and 'Option' codes.
+
+        Returns:
+        str: The type of the financial code ('Future', 'Option', or 'Unknown').
+        """
+        import re
+        for name, pattern_str in pattern_rule_dict.items():
+            if re.compile(pattern_str).match(code):
+                return name
+            elif re.compile(pattern_str.replace('+-', '+').replace(']-', ']')).match(code):
+                return name
+        else:
+            return 'Unknown'
 
 
 class API(object):
@@ -476,6 +557,26 @@ class API(object):
             return Response(content=parquet_data)
 
     @staticmethod
+    @app.get("/ak/op_not_board/{symbol}/{ym}")
+    async def get_op_quote_ak(symbol: str, ym: str, q: Union[str, None] = None):
+        """
+        获取期权截面行情
+        :param symbol:
+        :param ym:
+        :param q:
+        :return:
+        """
+        # sql = f"""select * from pf_nv.view_nv  where fund_id == '{register_code}'  order by dt """
+
+        t_trading_board = DelayFutOptionQuote._op_quote_no_board(symbol=symbol, end_month=ym)
+
+        if t_trading_board.empty:
+            return None
+        else:
+            parquet_data = Tools.send_df(t_trading_board)
+            return Response(content=parquet_data)
+
+    @staticmethod
     @app.get("/ak/op/{symbol}/{ym}")
     async def get_op_quote_ak(symbol: str, ym: str, q: Union[str, None] = None):
         """
@@ -493,6 +594,49 @@ class API(object):
             return None
         else:
             parquet_data = Tools.send_df(t_trading_board)
+            return Response(content=parquet_data)
+
+    @staticmethod
+    @app.post("/holding/{pos_file}/")
+    async def post_current_position(pos_file, pos: PositionItem, ):
+
+        df = pd.DataFrame(pos.Data)
+
+        # 假设的持仓数据
+        with sqlite3.connect(pos_file) as conn:
+            df.to_sql('Holding', conn, if_exists='append', index=False)
+
+        return {"message": "File uploaded successfully", "dataframe": df.to_dict(orient="records")}
+
+    @staticmethod
+    @app.get("/holding/{pos_file}/")
+    def get_current_position(pos_file, q: Union[str, None] = None):
+
+        holding_sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='Holding';"
+
+        sql = 'select * from Holding where time == (select max(time) from Holding) order by time desc'
+
+        # 假设的持仓数据
+        with sqlite3.connect(pos_file) as conn:
+            status = pd.read_sql(holding_sql, conn)
+            if status.empty:
+                res = pd.DataFrame(columns=['Code', 'Quantity', 'Cost', 'CodeType'])
+            else:
+                positions_df = pd.read_sql(sql, conn)
+                # positions_df = positions_df[positions_df['time'] == positions_df['time'].max()]
+                h = []
+                for contract, v in positions_df.groupby('Code'):
+                    code_type = PositionHelper.code_type_detect(contract)
+                    if code_type == 'Option':
+                        code_type = PositionHelper.option_type_detect(contract)
+                    v['CodeType'] = code_type
+                    h.append(v)
+                res = pd.concat(h)
+
+        if res.empty:
+            return None
+        else:
+            parquet_data = Tools.send_df(res)
             return Response(content=parquet_data)
 
 

@@ -1,0 +1,8 @@
+
+quote_ak_api: '47.104.186.157:3100'
+
+
+src: 'clickhouse://default:Imsn0wfree@47.104.186.157:8123/system'
+
+
+pos_file_path: 'pos.sqlite'

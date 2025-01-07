@@ -161,7 +161,7 @@ class MockStrikePrice(object):
             return xt
 
     @classmethod
-    # @file_cache()
+    # @sqlite_cache()
     def check_wthr_dwnwrd_adj(cls, st, xt, r, sigma, T, I, P, buyback_cond: float, force=False, verbose=True):
         """
         st < 0.7xt

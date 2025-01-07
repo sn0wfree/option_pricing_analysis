@@ -47,54 +47,8 @@ class NonRealTimeQuote(object):
 # from WindPy import w
 # w.start()
 
-def query(url):
-    x = requests.get(url)
-    dat = parse_df(x.content)
-    return dat
 
 
-class QuoteHolder(object):
-    @staticmethod
-    @timer
-    def get_op_quote_via_cffex(symbol='mo', end_month="ALL", drop_ym=True, base_host_port='47.104.186.157:3100'):
-        url = f'http://{base_host_port}/ak/op/{symbol}/{end_month}'
-        # 获取行情数据
-        t_trading_board = query(url)
-
-        if not drop_ym:
-            return t_trading_board
-        elif end_month != 'ALL':
-            return t_trading_board.drop('end_month', axis=1)
-        else:
-            return t_trading_board
-
-    @staticmethod
-    @timer
-    def get_idx_minute_quote_via_ak(symbol='000852', base_host_port='47.104.186.157:3100'):
-        url = f'http://{base_host_port}/ak/idx/{symbol}/1'
-        dat = query(url)
-        dat['代码'] = symbol
-
-        return dat
-
-
-class PositionHolder(object):
-
-    @staticmethod
-    def get_current_position():
-        # 假设的持仓数据
-        positions_dict = {
-            'MO2410-P-4300.CFE': {'Quantity': 10, 'Price': 10.75, 'Delta': 0.5, 'Gamma': 0.05, 'Theta': -0.05,
-                                  'Vega': 0.1},
-            'MO2410-P-4200.CFE': {'Quantity': 5, 'Price': 10.50, 'Delta': 0.5, 'Gamma': 0.05, 'Theta': -0.05,
-                                  'Vega': 0.1}
-        }
-
-        positions = pd.DataFrame(positions_dict).T
-        positions.index.name = 'code'
-        positions = positions.reset_index()
-
-        return positions
 
 
 if __name__ == '__main__':
